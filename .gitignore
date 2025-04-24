@@ -1,0 +1,28 @@
+# Entornos virtuales
+.venv/
+
+# Archivos de Python
+__pycache__/
+*.py[cod]
+
+# Archivos sensibles
+.env
+gurobi.lic
+
+# Archivos de Jupyter
+.ipynb_checkpoints/
+
+# Archivos de sistema
+.DS_Store
+
+# Archivos mina
+CP_fases.txt
+
+# Archivo xd
+
+corner_alg.ipynb
+df_mina_clustered_4.csv
+
+# Imagenes
+*.png
+

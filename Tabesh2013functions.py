@@ -6,16 +6,14 @@ import matplotlib.patches as patches
 import matplotlib.colors as mcolors 
 import time
 
-def plot_fase_banco(FaseBanco, column_hue='cut', cmap='plasma', show_block_label=True, show_grid=True, xsize = 10, ysize = 10):
+def plot_fase_banco(FaseBanco, column_hue='cut', cmap='plasma', show_block_label=True, show_grid=True, xsize = 10, ysize = 10, xlim=None, ylim=None):
     fig, ax = plt.subplots(figsize=(xsize, ysize), dpi=100)
     norm = None
     colormap = None
     color_map_discrete = {}
     variables_continuas = FaseBanco.select_dtypes(include='float64').columns.tolist()
-    
-    fase = FaseBanco['fase'][0]
-    z = FaseBanco['z'][0]
-
+    fase = FaseBanco['fase'].values[0]
+    z = FaseBanco['z'].values[0]
     col_data = FaseBanco[column_hue]
     if column_hue in variables_continuas:
         is_continuous = True
@@ -59,17 +57,20 @@ def plot_fase_banco(FaseBanco, column_hue='cut', cmap='plasma', show_block_label
                 block_value = int(block_value)
             ax.text(x_center, y_center, str(block_value), ha='center', va='center', fontsize=8, color='black')
     
-    if is_continuous:
+    # Al final, define los límites con las variables nuevas si están dadas
+    if xlim is not None:
+        ax.set_xlim(xlim)
+    else:
         x_min = FaseBanco['x'].min() - block_width
         x_max = FaseBanco['x'].max() + block_width
         ax.set_xlim(x_min, x_max)
+
+    if ylim is not None:
+        ax.set_ylim(ylim)
     else:
-        x_min = FaseBanco['x'].min() - block_width
-        x_max = FaseBanco['x'].max() + 5*block_width
-        ax.set_xlim(x_min, x_max)
-    y_min = FaseBanco['y'].min() - block_height
-    y_max = FaseBanco['y'].max() + block_height
-    ax.set_ylim(y_min, y_max)
+        y_min = FaseBanco['y'].min() - block_height
+        y_max = FaseBanco['y'].max() + block_height
+        ax.set_ylim(y_min, y_max)
 
     ax.set_aspect('equal', adjustable='box')
     ax.set_xlabel('X')
@@ -426,7 +427,7 @@ def Clustering(
     print(f"Clusters eliminados: {Clusters_Eliminados}")
     print(f"Total de clusters: {N_Clusters}")
     print(f'Tiempo: {tiempo_agregacion}')
-
+    tiempo_postprocesado = 0
     if PostProcessing:
         ID_Small_Clusters = fase_banco['cluster'].value_counts().loc[fase_banco['cluster'].value_counts() < Min_Cluster_Length].index.tolist()
         max_i_cluster = fase_banco['cluster'].max() + 1

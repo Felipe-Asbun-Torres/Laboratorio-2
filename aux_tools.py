@@ -257,7 +257,7 @@ def calcular_matriz_similitud_con_penalizacion(
     S = np.full((N, N), np.inf, dtype=float)
 
     # Asegurar que las columnas necesarias existen
-    required_cols = ['x', 'y', 'ley', 'tipo_material', 'ID']
+    required_cols = ['x', 'y', 'cut', 'tipomineral', 'id']
     if not all(col in df_current_banco.columns for col in required_cols):
         print("Error: Faltan columnas en df_current_banco para calcular similitud.")
         # Devolver matriz vacía o lanzar error? Devolver -inf por ahora.
@@ -265,9 +265,9 @@ def calcular_matriz_similitud_con_penalizacion(
 
     # Extraer columnas relevantes como arrays NumPy para eficiencia
     coords = df_current_banco[['x', 'y']].values
-    leys = df_current_banco['ley'].values
-    rocks = df_current_banco['tipo_material'].values
-    original_ids = df_current_banco['ID'].values # Necesitamos el ID original
+    leys = df_current_banco['cut'].values
+    rocks = df_current_banco['tipomineral'].values
+    original_ids = df_current_banco['id'].values # Necesitamos el ID original
 
     # print(f"  Calculando similitud para {N} bloques. Penalización activa: {penalty_factor_c != 1.0}")
     denominador_max = 0
@@ -335,7 +335,7 @@ def hierarchical_mine_clustering_adaptado(
     if n_blocks == 0: return [] # No hay nada que clusterizar
 
     # Usar el ID original si existe, si no, el índice procesado 0..N-1
-    original_block_ids = df_processed['ID'].values if 'ID' in df_processed.columns else df_processed.index.values
+    original_block_ids = df_processed['id'].values if 'id' in df_processed.columns else df_processed.index.values
 
     clusters = [{'id': i, # ID interno del cluster (0 a N-1)
                  'blocks': {original_block_ids[i]}, # Conjunto de IDs originales
@@ -434,7 +434,7 @@ def hierarchical_mine_clustering_adaptado2(
     if n_blocks == 0: return [] # No hay nada que clusterizar
 
     # Usar el ID original si existe, si no, el índice procesado 0..N-1
-    original_block_ids = df_processed['ID'].values if 'ID' in df_processed.columns else df_processed.index.values
+    original_block_ids = df_processed['id'].values if 'id' in df_processed.columns else df_processed.index.values
 
     clusters = [{'id': i, # ID interno del cluster (0 a N-1)
                  'blocks': {original_block_ids[i]}, # Conjunto de IDs originales
@@ -524,15 +524,15 @@ def find_block_below_mapping(df_curr, df_prev, bench_col='banco'):
     # Usar merge es una opción, aunque puede ser lento para DFs grandes
     try:
         # Asegurar que las columnas de merge existen
-        if not all(c in df_curr.columns for c in ['x', 'y', 'ID']): return {}
-        if not all(c in df_prev.columns for c in ['x', 'y', 'ID']): return {}
+        if not all(c in df_curr.columns for c in ['x', 'y', 'id']): return {}
+        if not all(c in df_prev.columns for c in ['x', 'y', 'id']): return {}
 
         # Renombrar ID del previo para evitar colisión
-        df_prev_lookup = df_prev[['x', 'y', 'ID']].rename(columns={'ID': 'ID_prev'})
+        df_prev_lookup = df_prev[['x', 'y', 'id']].rename(columns={'id': 'id_prev'})
 
         # Hacer merge basado en coordenadas x, y
         merged_df = pd.merge(
-            df_curr[['ID', 'x', 'y']],
+            df_curr[['id', 'x', 'y']],
             df_prev_lookup,
             on=['x', 'y'],
             how='left' # Mantener todos los bloques del banco actual
@@ -540,8 +540,8 @@ def find_block_below_mapping(df_curr, df_prev, bench_col='banco'):
 
         # Crear el diccionario desde el merge exitoso
         # Iterar sobre filas donde ID_prev no es NaN
-        for _, row in merged_df.dropna(subset=['ID_prev']).iterrows():
-             block_below_map[int(row['ID'])] = int(row['ID_prev'])
+        for _, row in merged_df.dropna(subset=['id_prev']).iterrows():
+             block_below_map[int(row['id'])] = int(row['id_prev'])
 
     except Exception as e:
          print(f"    Error durante el merge para encontrar bloques inferiores: {e}")
@@ -581,8 +581,8 @@ def cluster_mina_por_fase_banco(
     for phase in fases_a_procesar:
         print(f"\n--- Procesando Fase {phase} ---")
         # Filtrar por fase y asegurarse que la columna ID existe
-        if 'ID' not in df_mina.columns:
-             print("Error: Se requiere una columna 'ID' única para cada bloque.")
+        if 'id' not in df_mina.columns:
+             print("Error: Se requiere una columna 'id' única para cada bloque.")
              continue # Saltar esta fase
         df_phase = df_mina[df_mina['fase'] == phase].copy()
         if df_phase.empty:
@@ -622,9 +622,9 @@ def cluster_mina_por_fase_banco(
             if n_current <= target_num_clusters_per_bench:
                  print(f"   Banco {current_banco_level}: Número de bloques ({n_current}) <= target ({target_num_clusters_per_bench}). Asignando clusters individuales.")
                  # Asignar cada bloque a su propio cluster
-                 current_bench_cluster_map = {row['ID']: idx+1 for idx, row in df_current_processed.iterrows()}
+                 current_bench_cluster_map = {row['id']: idx+1 for idx, row in df_current_processed.iterrows()}
                  # Simular salida de clustering para consistencia
-                 current_final_clusters = [{'cluster_internal_id': idx, 'blocks': {row['ID']}, 'size': 1}
+                 current_final_clusters = [{'cluster_internal_id': idx, 'blocks': {row['id']}, 'size': 1}
                                           for idx, row in df_current_processed.iterrows()]
             else:
                 # 2. Calcular Similitud (con o sin penalización)
@@ -667,8 +667,8 @@ def cluster_mina_por_fase_banco(
                          for block_id in cluster_data['blocks']:
                              current_bench_cluster_map[block_id] = cluster_label # Mapeo para el siguiente banco
                              # Asignar al DataFrame principal usando la etiqueta global
-                             df_mina.loc[df_mina['ID'] == block_id, 'final_cluster_id'] = cluster_label # Guarda el ID local del banco
-                             df_mina.loc[df_mina['ID'] == block_id, 'final_cluster_label'] = global_cluster_label # Guarda etiqueta global
+                             df_mina.loc[df_mina['id'] == block_id, 'final_cluster_id'] = cluster_label # Guarda el ID local del banco
+                             df_mina.loc[df_mina['id'] == block_id, 'final_cluster_label'] = global_cluster_label # Guarda etiqueta global
 
 
                      all_clusters_info[(phase, current_banco_level)] = current_final_clusters # Guardar detalles
@@ -714,8 +714,8 @@ def cluster_mina_por_fase_banco2(
     for phase in fases_a_procesar:
         print(f"\n--- Procesando Fase {phase} ---")
         # Filtrar por fase y asegurarse que la columna ID existe
-        if 'ID' not in df_mina.columns:
-             print("Error: Se requiere una columna 'ID' única para cada bloque.")
+        if 'id' not in df_mina.columns:
+             print("Error: Se requiere una columna 'id' única para cada bloque.")
              continue # Saltar esta fase
         df_phase = df_mina[df_mina['fase'] == phase].copy()
         if df_phase.empty:
@@ -755,9 +755,9 @@ def cluster_mina_por_fase_banco2(
             if n_current <= target_num_clusters_per_bench:
                  print(f"   Banco {current_banco_level}: Número de bloques ({n_current}) <= target ({target_num_clusters_per_bench}). Asignando clusters individuales.")
                  # Asignar cada bloque a su propio cluster
-                 current_bench_cluster_map = {row['ID']: idx+1 for idx, row in df_current_processed.iterrows()}
+                 current_bench_cluster_map = {row['id']: idx+1 for idx, row in df_current_processed.iterrows()}
                  # Simular salida de clustering para consistencia
-                 current_final_clusters = [{'cluster_internal_id': idx, 'blocks': {row['ID']}, 'size': 1}
+                 current_final_clusters = [{'cluster_internal_id': idx, 'blocks': {row['id']}, 'size': 1}
                                           for idx, row in df_current_processed.iterrows()]
             else:
                 # 2. Calcular Similitud (con o sin penalización)
@@ -800,8 +800,8 @@ def cluster_mina_por_fase_banco2(
                          for block_id in cluster_data['blocks']:
                              current_bench_cluster_map[block_id] = cluster_label # Mapeo para el siguiente banco
                              # Asignar al DataFrame principal usando la etiqueta global
-                             df_mina.loc[df_mina['ID'] == block_id, 'final_cluster_id'] = cluster_label # Guarda el ID local del banco
-                             df_mina.loc[df_mina['ID'] == block_id, 'final_cluster_label'] = global_cluster_label # Guarda etiqueta global
+                             df_mina.loc[df_mina['id'] == block_id, 'final_cluster_id'] = cluster_label # Guarda el ID local del banco
+                             df_mina.loc[df_mina['id'] == block_id, 'final_cluster_label'] = global_cluster_label # Guarda etiqueta global
 
 
                      all_clusters_info[(phase, current_banco_level)] = current_final_clusters # Guardar detalles
@@ -820,10 +820,10 @@ def cluster_mina_por_fase_banco2(
 def calcular_matriz_similitud_completa(df_banco, wd=2, wg=2, r=0.2):
     N = len(df_banco)
     S = np.full((N, N), np.inf, dtype=float)
-    if not all(col in df_banco.columns for col in ['x', 'y', 'ley', 'tipo_material']): return S
+    if not all(col in df_banco.columns for col in ['x', 'y', 'cut', 'tipomineral']): return S
     coords = df_banco[['x', 'y']].values
-    leys = df_banco['ley'].values
-    rocks = df_banco['tipo_material'].values
+    leys = df_banco['cut'].values
+    rocks = df_banco['tipomineral'].values
     denominador_max = 0
     for i in range(N):
         for j in range(i + 1, N):
@@ -847,7 +847,7 @@ def calcular_matriz_similitud_completa(df_banco, wd=2, wg=2, r=0.2):
 def plot_phase_clusters_3d_interactive_bancos(df_clustered, phase_to_plot,
                                             cluster_col='final_cluster_label',
                                             x_col='x', y_col='y', z_col='banco',
-                                            id_col='ID',
+                                            id_col='id',
                                             marker_size=3):
     """
     Genera un gráfico 3D interactivo de los bloques para una fase dada,
