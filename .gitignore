@@ -21,8 +21,10 @@ CP_fases.txt
 # Archivo xd
 
 corner_alg.ipynb
-df_mina_clustered_4.csv
+#DCS_model.ipynb
 
-# Imagenes
+# Extensiones varias
 *.png
+*.csv
+*.pdf
 
