@@ -467,7 +467,7 @@ def Clustering(
         execution_time = tiempo_agregacion + tiempo_postprocesado
     else:
         execution_time = tiempo_agregacion
-    return [fase_banco, N_Clusters, adj_matrix_copy, sim_matrix_copy, execution_time, adj_matrix_sparse]
+    return [fase_banco, N_Clusters, execution_time, adj_matrix_copy, sim_matrix_copy, adj_matrix_sparse]
 
 
 def ClusteringSalman(
@@ -611,10 +611,10 @@ def ClusteringSalman(
                 ley_media_p = ley_media_p.sum()/sum_density_p
 
                 diff_ley_media = np.abs(ley_media-ley_media_p)
-                print(diff_ley_media)
+                # print(diff_ley_media)
                 if diff_ley_media < min:
                     id_min = p
-                print(id_min)
+                # print(id_min)
             
             fase_banco.loc[fase_banco['cluster'] == id, 'cluster'] = id_min
         
@@ -630,4 +630,4 @@ def ClusteringSalman(
         execution_time = tiempo_agregacion + tiempo_postprocesado
     else:
         execution_time = tiempo_agregacion
-    return [fase_banco, N_Clusters, adj_matrix_copy, sim_matrix_copy, execution_time, adj_matrix_sparse]
+    return [fase_banco, N_Clusters, execution_time, adj_matrix_copy, sim_matrix_copy, adj_matrix_sparse]
