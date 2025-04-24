@@ -6,8 +6,8 @@ import matplotlib.patches as patches
 import matplotlib.colors as mcolors 
 import time
 
-def plot_fase_banco(FaseBanco, column_hue='cut', cmap='plasma', show_block_label=True, show_grid=True):
-    fig, ax = plt.subplots(figsize=(10, 10), dpi=100)
+def plot_fase_banco(FaseBanco, column_hue='cut', cmap='plasma', show_block_label=True, show_grid=True, xsize = 10, ysize = 10):
+    fig, ax = plt.subplots(figsize=(xsize, ysize), dpi=100)
     norm = None
     colormap = None
     color_map_discrete = {}
@@ -117,17 +117,24 @@ def Calculate_Similarity_Matrix(
         distancia = True, 
         ley = False, 
         destino = True, 
+        directional_mining = False,
+        tipo_roca = True,
         peso_distancia = 1, 
         peso_ley = 1, 
         penalizacion_destino = 0.9, 
-        tol_ley = 0.0001
+        penalizacion_roca = 0.9,
+        peso_directional_mining=1,
+        tol_ley = 0.0001,
+        tol_dir = 0.0001,
+        P_inicio = (-1,-1),
+        P_final = (1,1)
         ):
     '''
     Calcula la similaridad entre los bloques de la fase-banco, de acuerdo a distancia, ley o destino.
     No es recomendable que todos los criterios de similaridad sean True y, a su vez, al menos uno de ellos debe ser True.as_integer_ratio
     Devuelve una matriz densa.
     '''
-    if not(distancia or ley or destino):
+    if not(distancia or ley or destino or directional_mining):
         raise ValueError("Al menos distancia, ley, o destino deben ser True.")
 
     n = len(fasebanco)
@@ -169,12 +176,38 @@ def Calculate_Similarity_Matrix(
         T = np.ones((n,n)) - (1-penalizacion_destino)*T*np.ones((n,n))
     else:
         T = 1
-    similarity_matrix = np.divide(T,  (np.multiply(ND**peso_distancia, NG**peso_ley)), where=np.ones((n,n)) - np.diag(np.ones(n))  ==1)
+
+    if tipo_roca:
+        rock = fasebanco['tipomineral'].values
+        R1 = np.matlib.repmat(rock.reshape(len(rock),1), 1, len(rock))
+        R2 = R1.T
+        R = R1 != R2
+
+        R = np.ones((n,n)) - (1-penalizacion_roca)*R*np.ones((n,n))
+
+    if directional_mining:
+        x = fasebanco['x'].values
+        y = fasebanco['y'].values
+        X1 = np.matlib.repmat(x.reshape(len(x),1), 1, len(x))
+        # X2 = X1.T
+        Y1 = np.matlib.repmat(y.reshape(len(y),1), 1, len(y))
+        # Y2 = Y1.T
+
+        M1 = (X1 - P_inicio[0])**2 + (Y1 - P_inicio[1])**2
+        M2 = (X1 - P_final[0])**2 + (Y1 - P_final[1])**2
+        Mi = np.multiply( np.sign( M1 - M2 ), np.sqrt( np.abs(M1 - M2 )) )
+        DM = np.maximum(np.abs(Mi - Mi.T), tol_dir)
+    else:
+        DM = 1
+    numerator = np.multiply(R,T)
+    denominator = np.multiply(ND**peso_distancia, NG**peso_ley)
+    denominator = np.multiply(denominator, DM**peso_directional_mining)
+    similarity_matrix = np.divide(numerator,  denominator, where=np.ones((n,n)) - np.diag(np.ones(n)) ==1)
     return similarity_matrix
 
 def Hadamard_Product_Sparse(A, B):
     '''
-    Calcula el producto de Hadamard (componente a componente) entre una matriz sparse y una densa.
+    Calcula el producto de Hadamard (componente a componente) entre una matriz sparse (A) y una densa (B).
     Devuelve una matriz sparse (CSR).
     '''
     rows, cols = A.nonzero()
@@ -227,8 +260,14 @@ def Find_Most_Similar_Adjacent_Clusters_Hadamard(AdjencyMatrix, SimilarityMatrix
     index_max_similarity = np.argmax(Sim_Matrix.data)
     row_max = Sim_Matrix.row[index_max_similarity]
     col_max = Sim_Matrix.col[index_max_similarity]
-
-    return [row_max, col_max]
+    
+    if row_max < col_max:
+        i = row_max
+        j = col_max
+    else:
+        i = col_max
+        j = row_max
+    return [i, j]
 
 def Find_Corner_Blocks(FaseBanco, AdjencyMatrix):
     '''
@@ -291,11 +330,18 @@ def Clustering(
         distancia = True,
         ley = False,
         destino = True,
+        directional_mining = False,
         peso_distancia = 2,
         peso_ley = 0.5,
         penalizacion_destino = 0.8,
-        tol_ley = 0.0001
+        peso_directional_mining=1,
+        tol_ley = 0.0001,
+        tol_dir = 0.0001,
+        P_inicio = (-1,-1),
+        P_final = (1,1),
+        Debug = False
         ):
+        
     '''
     Realiza un clustering jerárquico y agregativo de la fase-banco.
     Average_Desired_Length_Cluster, Max_Cluster_Length y Min_Cluster_Length son restricciones blandas del tamaño de los clusters. Es decir, no siempre se van a satisfacer.
@@ -304,9 +350,11 @@ def Clustering(
     Devuelve un DataFrame de la fase-banco con la columna 'cluster' que indica el cluster al que pertenece cada bloque, y las matrices de adyacencia y de similaridad originales.
     '''
     fase_banco = FaseBanco.copy()
+    
+    
     adj_matrix_sparse = Calculate_Adjency_Matrix(fase_banco)
     adj_matrix_copy = adj_matrix_sparse.copy()
-    sim_matrix = Calculate_Similarity_Matrix(fase_banco, distancia=distancia, ley=ley, destino=destino, peso_distancia=peso_distancia, peso_ley=peso_ley, penalizacion_destino=penalizacion_destino, tol_ley=tol_ley)
+    sim_matrix = Calculate_Similarity_Matrix(fase_banco, distancia=distancia, ley=ley, destino=destino, peso_distancia=peso_distancia, peso_ley=peso_ley, penalizacion_destino=penalizacion_destino, tol_ley=tol_ley, directional_mining=directional_mining, tol_dir=tol_dir, P_inicio=P_inicio, P_final=P_final, peso_directional_mining=peso_directional_mining)
     sim_matrix_copy = sim_matrix.copy()
 
     print(f'Nonzero entries of Adjency Matrix: {adj_matrix_sparse.nnz}')
@@ -324,7 +372,8 @@ def Clustering(
         C = Find_Most_Similar_Adjacent_Clusters_Hadamard(adj_matrix_sparse, sim_matrix)
         t2_fmsac = time.time()
         tries += 1
-        print(f'Try: {tries}, time: {t2_fmsac-t1_fmsac}')
+        if Debug:
+            print(f'Try: {tries}, time: {t2_fmsac-t1_fmsac}')
         if C is None:
             break
         (i,j) = C
@@ -414,4 +463,171 @@ def Clustering(
         print(f"Total de clusters: {N_Clusters}")
         print(f'Tiempo: {tiempo_postprocesado}')
 
-    return [fase_banco, N_Clusters, adj_matrix_copy, sim_matrix_copy, tiempo_agregacion+tiempo_postprocesado]
+    if PostProcessing:
+        execution_time = tiempo_agregacion + tiempo_postprocesado
+    else:
+        execution_time = tiempo_agregacion
+    return [fase_banco, N_Clusters, adj_matrix_copy, sim_matrix_copy, execution_time, adj_matrix_sparse]
+
+
+def ClusteringSalman(
+        FaseBanco, 
+        Average_Desired_Length_Cluster = 30, 
+        Max_Cluster_Length = 35, 
+        Min_Cluster_Length = 10, 
+        PostProcessing = True, 
+        Iterations_PostProcessing = 5, 
+        Tabesh = True,
+        distancia = True,
+        ley = False,
+        destino = True,
+        directional_mining = False,
+        peso_distancia = 2,
+        peso_ley = 0.5,
+        penalizacion_destino = 0.8,
+        peso_directional_mining=1,
+        tol_ley = 0.0001,
+        tol_dir = 0.0001,
+        P_inicio = (-1,-1),
+        P_final = (1,1),
+        Debug = False
+        ):
+        
+    '''
+    Realiza un clustering jerárquico y agregativo de la fase-banco.
+    Average_Desired_Length_Cluster, Max_Cluster_Length y Min_Cluster_Length son restricciones blandas del tamaño de los clusters. Es decir, no siempre se van a satisfacer.
+    PostProcessing es una heurística para mejorar la forma de los clusters y para eliminar clusters pequeños.
+    Depende de las funciones Calculate_Adjency_Matrix, Calculate_Similarity_Matrix, Find_Most_Similar_Adjacent_Clusters_Hadamard y Find_Corner_Blocks.
+    Devuelve un DataFrame de la fase-banco con la columna 'cluster' que indica el cluster al que pertenece cada bloque, y las matrices de adyacencia y de similaridad originales.
+    '''
+    fase_banco = FaseBanco.copy()
+    
+    
+    adj_matrix_sparse = Calculate_Adjency_Matrix(fase_banco)
+    adj_matrix_copy = adj_matrix_sparse.copy()
+    sim_matrix = Calculate_Similarity_Matrix(fase_banco, distancia=distancia, ley=ley, destino=destino, peso_distancia=peso_distancia, peso_ley=peso_ley, penalizacion_destino=penalizacion_destino, tol_ley=tol_ley, directional_mining=directional_mining, tol_dir=tol_dir, P_inicio=P_inicio, P_final=P_final, peso_directional_mining=peso_directional_mining)
+    sim_matrix_copy = sim_matrix.copy()
+
+    print(f'Nonzero entries of Adjency Matrix: {adj_matrix_sparse.nnz}')
+    
+    N_Clusters = len(fase_banco)
+    n = N_Clusters
+    Max_N_Clusters = len(fase_banco) // Average_Desired_Length_Cluster
+
+    fase_banco['cluster'] = np.arange(N_Clusters).astype(int)
+    Clusters_Eliminados = 0
+    t1 = time.time()
+    tries = 0
+    while N_Clusters > Max_N_Clusters:
+        t1_fmsac = time.time()
+        C = Find_Most_Similar_Adjacent_Clusters_Hadamard(adj_matrix_sparse, sim_matrix)
+        t2_fmsac = time.time()
+        tries += 1
+        if Debug:
+            print(f'Try: {tries}, time: {t2_fmsac-t1_fmsac}')
+        if C is None:
+            break
+        (i,j) = C
+        cluster_i = fase_banco[fase_banco['cluster'] == fase_banco.iloc[i]['cluster']]
+        cluster_j = fase_banco[fase_banco['cluster'] == fase_banco.iloc[j]['cluster']]
+
+        if len(cluster_i) + len(cluster_j) <= Max_Cluster_Length:
+            sim_matrix[i,:] = np.min([sim_matrix[i,:], sim_matrix[j,:]], axis=0)
+            sim_matrix[:,i] = np.min([sim_matrix[:,i], sim_matrix[:,j]], axis=0)
+            sim_matrix[j,:] = np.zeros(n)
+            sim_matrix[:,j] = np.zeros(n)
+            
+            adj_matrix_sparse = adj_matrix_sparse.tolil()
+            adj_matrix_sparse[i,:] = adj_matrix_sparse[i,:].maximum(adj_matrix_sparse[j,:])
+            adj_matrix_sparse[:,i] = adj_matrix_sparse[:,i].maximum(adj_matrix_sparse[:,j])
+
+            adj_matrix_sparse[j,:] = np.zeros(n)
+            adj_matrix_sparse[:,j] = np.zeros(n)
+            adj_matrix_sparse = adj_matrix_sparse.tocsr()
+            adj_matrix_sparse.eliminate_zeros()
+
+            fase_banco.loc[fase_banco['cluster'] == fase_banco.iloc[j]['cluster'], 'cluster'] = fase_banco.iloc[i]['cluster'].astype(int)
+            N_Clusters -= 1
+            Clusters_Eliminados += 1
+        else:
+            adj_matrix_sparse[i,j] = 0
+            sim_matrix[i,j] = 0
+            adj_matrix_sparse.eliminate_zeros()
+    t2 = time.time()
+    tiempo_agregacion = t2 - t1
+    N_Clusters = len(fase_banco['cluster'].unique())
+    fase_banco['cluster'] = fase_banco['cluster'].map(lambda x: np.array(range(1,N_Clusters+1))[np.where(fase_banco['cluster'].unique() == x)[0][0]] if x in fase_banco['cluster'].unique() else x)
+    print(f"========PreProcessing Results========")
+    print(f"Clusters objetivo: {Max_N_Clusters}")
+    print(f"Clusters eliminados: {Clusters_Eliminados}")
+    print(f"Total de clusters: {N_Clusters}")
+    print(f'Tiempo: {tiempo_agregacion}')
+
+    if PostProcessing:
+        for i in range(Iterations_PostProcessing):
+            if Tabesh:
+                Corner_Blocks = Find_Corner_Blocks_Tabesh(fase_banco, adj_matrix_copy)
+            else:
+                Corner_Blocks = Find_Corner_Blocks(fase_banco, adj_matrix_copy)
+            
+            if len(Corner_Blocks) == 0:
+                break
+            for i in Corner_Blocks.keys():
+                if len(Corner_Blocks[i]) == 2:
+                    Cluster_to_insert = Corner_Blocks[i][int(np.round(np.random.rand()))]
+                elif len(Corner_Blocks[i]) == 1:
+                    choose = [Corner_Blocks[i][0], fase_banco.iloc[i]['cluster']]
+                    Cluster_to_insert = choose[int(np.round(np.random.rand()))]
+                else:
+                    Cluster_to_insert = np.unique_counts(Corner_Blocks[i]).values[np.unique_counts(Corner_Blocks[i]).counts.argmax()]
+                fase_banco.loc[i, 'cluster'] = Cluster_to_insert
+        
+        ID_Small_Clusters = fase_banco['cluster'].value_counts().loc[fase_banco['cluster'].value_counts() < Min_Cluster_Length].index.tolist()
+        t1 = time.time()
+        # print(ID_Small_Clusters)
+        for id in ID_Small_Clusters:
+            sum_density = fase_banco.loc[fase_banco['cluster']==id]['density'].sum()
+            ley_media = fase_banco.loc[fase_banco['cluster']==id]['cut']*fase_banco.loc[fase_banco['cluster']==id]['density']
+            ley_media = ley_media.sum()/sum_density
+
+            Bloques_Frontera = []
+            cluster = fase_banco.loc[fase_banco['cluster']==id]
+            id_clusters_vecinos = []
+            for bloque in cluster.index:
+                vecinos = adj_matrix_copy[bloque,:].toarray()[0].nonzero()[0]
+                # print(vecinos)
+                for v in vecinos:
+                    id_vecino = fase_banco['cluster'][v]
+                    if id_vecino != id:
+                        Bloques_Frontera.append(bloque)
+                        id_clusters_vecinos.append(id_vecino)
+            id_clusters_vecinos = np.unique(id_clusters_vecinos)
+            # print(id_clusters_vecinos)
+            min = np.inf
+            id_min = 0
+            for p in id_clusters_vecinos:
+                sum_density_p = fase_banco.loc[fase_banco['cluster']==p]['density'].sum()
+                ley_media_p = fase_banco.loc[fase_banco['cluster']==p]['cut']*fase_banco.loc[fase_banco['cluster']==p]['density']
+                ley_media_p = ley_media_p.sum()/sum_density_p
+
+                diff_ley_media = np.abs(ley_media-ley_media_p)
+                print(diff_ley_media)
+                if diff_ley_media < min:
+                    id_min = p
+                print(id_min)
+            
+            fase_banco.loc[fase_banco['cluster'] == id, 'cluster'] = id_min
+        
+        N_Clusters = len(fase_banco['cluster'].unique())
+        fase_banco['cluster'] = fase_banco['cluster'].map(lambda x: np.array(range(1,N_Clusters+1))[np.where(fase_banco['cluster'].unique() == x)[0][0]] if x in fase_banco['cluster'].unique() else x)
+        t2 = time.time()
+        tiempo_postprocesado = t2-t1
+        print(f"========PostProcessing Results========")
+        print(f"Total de clusters: {N_Clusters}")
+        print(f'Tiempo: {tiempo_postprocesado}')
+
+    if PostProcessing:
+        execution_time = tiempo_agregacion + tiempo_postprocesado
+    else:
+        execution_time = tiempo_agregacion
+    return [fase_banco, N_Clusters, adj_matrix_copy, sim_matrix_copy, execution_time, adj_matrix_sparse]
