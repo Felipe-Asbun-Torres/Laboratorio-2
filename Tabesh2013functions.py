@@ -7,6 +7,9 @@ import matplotlib.patches as patches
 import matplotlib.colors as mcolors 
 import time
 
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Plotting %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 def plot_fase_banco(FaseBanco, column_hue='cut', cmap='plasma', show_block_label=True, show_grid=True, xsize = 10, ysize = 10, highlight_blocks=[], points=[], arrows=[]):
     if FaseBanco.empty:
         print("El DataFrame 'FaseBanco' está vacío. No se puede graficar.")
@@ -103,6 +106,11 @@ def plot_fase_banco(FaseBanco, column_hue='cut', cmap='plasma', show_block_label
         ax.legend(handles=legend_patches, title=column_hue, loc='upper right', fontsize=8, title_fontsize=10)
     plt.tight_layout()
     plt.show()
+
+
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Implementation %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 def Calculate_Adjency_Matrix(FaseBanco, BlockWidth):
     '''
@@ -461,3 +469,75 @@ def Shape_Refinement_Mod(FaseBanco, AdjencyMatrix, Min_Cluster_Length = 10, Iter
     if Reset_Clusters_Index:
         fase_banco['cluster'] = fase_banco['cluster'].map(lambda x: np.array(range(1,N_Clusters+1))[np.where(fase_banco['cluster'].unique() == x)[0][0]] if x in fase_banco['cluster'].unique() else x)
     return [fase_banco, execution_time, N_Clusters]
+
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Automatic Creation of Cluster's Precedences %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+def Precedencias_Clusters_1(FaseBanco, P_inicio, P_final):
+    ID_Clusters = FaseBanco['cluster'].unique()
+    Distancias_Clusters = {}
+    for id in ID_Clusters:
+        Cluster = FaseBanco.loc[FaseBanco['cluster']==id]
+        P_center = (Cluster['x'].mean(), Cluster['y'].mean())
+        di = np.sqrt( (P_inicio[0] - P_center[0])**2 + (P_inicio[1] - P_center[1])**2 )
+        df = np.sqrt( (P_final[0] - P_center[0])**2 + (P_final[1] - P_center[1])**2 )
+        L = np.sqrt( (P_inicio[0] - P_final[0])**2 + (P_inicio[1] - P_final[1])**2 )
+        D = (di**2 + L**2 - df**2)/(2*L)
+        Distancias_Clusters[id] = (D, P_center)
+    
+    Clusters_Ordenados = sorted(Distancias_Clusters.items(), key=lambda item: item[1])
+    Clusters_Ordenados = dict(Clusters_Ordenados)
+    return Clusters_Ordenados
+
+def Precedencias_Clusters_2(FaseBanco, P_inicio):
+    ID_Clusters = FaseBanco['cluster'].unique()
+    Distancias_Clusters = {}
+    for id in ID_Clusters:
+        Cluster = FaseBanco.loc[FaseBanco['cluster']==id]
+        P_center = (Cluster['x'].mean(), Cluster['y'].mean())
+        di = np.sqrt( (P_inicio[0] - P_center[0])**2 + (P_inicio[1] - P_center[1])**2 )
+        Distancias_Clusters[id] = (di, P_center)
+    
+    Clusters_Ordenados = sorted(Distancias_Clusters.items(), key=lambda item: item[1])
+    Clusters_Ordenados = dict(Clusters_Ordenados)
+    return Clusters_Ordenados
+
+
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Metrics %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+def Rock_Unity(FaseBanco):
+    ID_Clusters = FaseBanco['cluster'].unique()
+    num_clusters = len(ID_Clusters)
+    sum_rock_unity = 0
+    for id in ID_Clusters:
+        Cluster = FaseBanco.loc[FaseBanco['cluster']==id]
+        n_cluster = len(Cluster)
+        max_rock = Cluster['tipomineral'].value_counts().max()
+        sum_rock_unity += max_rock/n_cluster
+    return sum_rock_unity/num_clusters
+
+def Destination_Dilution_Factor(FaseBanco, Block_Volume):
+    ID_Clusters = FaseBanco['cluster'].unique()
+    num_clusters = len(ID_Clusters)
+    sum_ddf = 0
+    for id in ID_Clusters:
+        Cluster = FaseBanco.loc[FaseBanco['cluster']==id]
+        max_destino = Cluster['destino'].value_counts().idxmax()
+        ton_destino = (Cluster.loc[Cluster['destino']==max_destino]['density']*Block_Volume).sum()
+        ton_total = (Cluster['density']*Block_Volume).sum()
+        sum_ddf += ton_destino/ton_total
+    return sum_ddf/num_clusters
+
+def Coefficient_Variation(FaseBanco):
+    ID_Clusters = FaseBanco['cluster'].unique()
+    num_clusters = len(ID_Clusters)
+    sum_cv = 0
+    for id in ID_Clusters:
+        Cluster = FaseBanco.loc[FaseBanco['cluster']==id]
+        std = Cluster['cut'].std()
+        mean = Cluster['cut'].mean()
+        sum_cv += std/mean
+    return sum_cv/num_clusters
