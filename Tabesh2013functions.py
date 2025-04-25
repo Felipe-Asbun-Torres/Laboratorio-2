@@ -7,6 +7,103 @@ import matplotlib.patches as patches
 import matplotlib.colors as mcolors 
 import time
 
+def plot_fase_banco(FaseBanco, column_hue='cut', cmap='plasma', show_block_label=True, show_grid=True, xsize = 10, ysize = 10, highlight_blocks=[], points=[], arrows=[]):
+    if FaseBanco.empty:
+        print("El DataFrame 'FaseBanco' está vacío. No se puede graficar.")
+        return
+    
+    fig, ax = plt.subplots(figsize=(xsize, ysize), dpi=100)
+    norm = None
+    colormap = None
+    color_map_discrete = {}
+    variables_continuas = FaseBanco.select_dtypes(include='float64').columns.tolist()
+    
+    fase = FaseBanco['fase'][0]
+    z = FaseBanco['z'][0]
+
+    col_data = FaseBanco[column_hue]
+    if column_hue in variables_continuas:
+        is_continuous = True
+    else:
+        is_continuous = False
+    
+    if is_continuous:
+        vmin = np.min(col_data)
+        vmax = np.max(col_data)
+        norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
+        colormap = plt.get_cmap(cmap)
+    else:
+        if len(col_data.unique())<=20:
+            colors = plt.get_cmap('tab20', len(col_data.unique()))
+            color_map_discrete = {val: colors(i) for i, val in enumerate(col_data.unique())}
+        else:
+            colors = plt.get_cmap(cmap, len(col_data.unique()))
+            color_map_discrete = {val: colors(i) for i, val in enumerate(col_data.unique())}
+
+    for i, row in FaseBanco.iterrows():
+        x_center = row['x']
+        y_center = row['y']
+        block_value = row[column_hue]
+        block_width = 10
+        block_height = 10
+
+        x_corner = x_center - block_width / 2
+        y_corner = y_center - block_height / 2
+
+        if is_continuous:
+            color = colormap(norm(block_value))
+        else:
+            color = color_map_discrete.get(block_value, 'gray')
+        
+        rect = patches.Rectangle((x_corner, y_corner), block_width, block_height, linewidth=0.5, edgecolor='black', facecolor=color)
+        ax.add_patch(rect)
+        if show_block_label:
+            if is_continuous:
+                block_value = np.trunc(block_value*10)/10
+            else:
+                block_value = int(block_value)
+            ax.text(x_center, y_center, str(block_value), ha='center', va='center', fontsize=8, color='black')
+    
+    if is_continuous:
+        x_min = FaseBanco['x'].min() - block_width
+        x_max = FaseBanco['x'].max() + block_width
+        ax.set_xlim(x_min, x_max)
+    else:
+        x_min = FaseBanco['x'].min() - block_width
+        x_max = FaseBanco['x'].max() + 5*block_width
+        ax.set_xlim(x_min, x_max)
+    y_min = FaseBanco['y'].min() - block_height
+    y_max = FaseBanco['y'].max() + block_height
+    ax.set_ylim(y_min, y_max)
+
+    ax.set_aspect('equal', adjustable='box')
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.set_title(f'Fase {fase} - Banco (Z={z}) - {column_hue}')
+    ax.grid(show_grid, color='gray', linestyle='--', linewidth=0.5)
+
+
+    for block in highlight_blocks:
+        ax.plot(FaseBanco['x'][block], FaseBanco['y'][block], 'ro', markersize=10)
+
+    for p in points:
+        ax.plot(p[0], p[1], 'bo', markersize=5)
+
+    for a in arrows:
+        P1, P2 = a
+        ax.annotate('', xy=P2, xytext=P1, arrowprops=dict(arrowstyle='->', color='black', lw=2, mutation_scale=15))
+
+    if is_continuous:
+        sm = plt.cm.ScalarMappable(cmap=colormap, norm=norm)
+        sm.set_array([])
+        cbar = fig.colorbar(sm, ax=ax, shrink=0.8, aspect=20)
+        cbar.set_label(column_hue, rotation=270, labelpad=15)
+    else:
+        legend_patches = [patches.Patch(color=color, label=str(value)) for value, color in color_map_discrete.items()]
+        ax.legend(handles=legend_patches, title=column_hue, loc='upper right', fontsize=8, title_fontsize=10)
+    plt.tight_layout()
+    plt.show()
+
 def Calculate_Adjency_Matrix(FaseBanco, BlockWidth):
     '''
     Crea la matriz de adyacencia de los bloques de la fase-banco respecto a sus coordenadas x e y.
