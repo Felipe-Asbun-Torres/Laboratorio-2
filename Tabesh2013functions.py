@@ -9,7 +9,8 @@ import time
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Plotting %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%}
+
 def plot_fase_banco(FaseBanco, column_hue='cut', cmap='plasma', show_block_label=True, show_grid=True, xsize = 10, ysize = 10, highlight_blocks=[], points=[], arrows=[]):
     if FaseBanco.empty:
         print("El DataFrame 'FaseBanco' está vacío. No se puede graficar.")
@@ -509,35 +510,44 @@ def Precedencias_Clusters_2(FaseBanco, P_inicio):
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 def Rock_Unity(FaseBanco):
-    ID_Clusters = FaseBanco['cluster'].unique()
+    ID_Clusters = np.sort(FaseBanco['cluster'].unique())
     num_clusters = len(ID_Clusters)
     sum_rock_unity = 0
+    ru_distribution = []
     for id in ID_Clusters:
         Cluster = FaseBanco.loc[FaseBanco['cluster']==id]
         n_cluster = len(Cluster)
         max_rock = Cluster['tipomineral'].value_counts().max()
-        sum_rock_unity += max_rock/n_cluster
-    return sum_rock_unity/num_clusters
+        ru = max_rock/n_cluster
+        sum_rock_unity += ru
+        ru_distribution.append(ru)
+    return [sum_rock_unity/num_clusters, ru_distribution]
 
 def Destination_Dilution_Factor(FaseBanco):
-    ID_Clusters = FaseBanco['cluster'].unique()
+    ID_Clusters = np.sort(FaseBanco['cluster'].unique())
     num_clusters = len(ID_Clusters)
     sum_ddf = 0
+    ddf_distribution = []
     for id in ID_Clusters:
         Cluster = FaseBanco.loc[FaseBanco['cluster']==id]
         max_destino = Cluster['destino'].value_counts().idxmax()
         ton_destino = Cluster.loc[Cluster['destino']==max_destino]['density'].sum()
         ton_total = Cluster['density'].sum()
-        sum_ddf += ton_destino/ton_total
-    return sum_ddf/num_clusters
+        ddf = ton_destino/ton_total
+        sum_ddf += ddf
+        ddf_distribution.append(ddf)
+    return [sum_ddf/num_clusters, ddf_distribution]
 
 def Coefficient_Variation(FaseBanco):
-    ID_Clusters = FaseBanco['cluster'].unique()
+    ID_Clusters = np.sort(FaseBanco['cluster'].unique())
     num_clusters = len(ID_Clusters)
     sum_cv = 0
+    cv_distribution = []
     for id in ID_Clusters:
         Cluster = FaseBanco.loc[FaseBanco['cluster']==id]
         std = Cluster['cut'].std()
         mean = Cluster['cut'].mean()
-        sum_cv += std/mean
-    return sum_cv/num_clusters
+        cv = std/mean
+        sum_cv += cv
+        cv_distribution.append(cv)
+    return [sum_cv/num_clusters, cv_distribution]
