@@ -519,15 +519,15 @@ def Rock_Unity(FaseBanco):
         sum_rock_unity += max_rock/n_cluster
     return sum_rock_unity/num_clusters
 
-def Destination_Dilution_Factor(FaseBanco, Block_Volume):
+def Destination_Dilution_Factor(FaseBanco):
     ID_Clusters = FaseBanco['cluster'].unique()
     num_clusters = len(ID_Clusters)
     sum_ddf = 0
     for id in ID_Clusters:
         Cluster = FaseBanco.loc[FaseBanco['cluster']==id]
         max_destino = Cluster['destino'].value_counts().idxmax()
-        ton_destino = (Cluster.loc[Cluster['destino']==max_destino]['density']*Block_Volume).sum()
-        ton_total = (Cluster['density']*Block_Volume).sum()
+        ton_destino = Cluster.loc[Cluster['destino']==max_destino]['density'].sum()
+        ton_total = Cluster['density'].sum()
         sum_ddf += ton_destino/ton_total
     return sum_ddf/num_clusters
 
