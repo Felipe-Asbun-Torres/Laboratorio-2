@@ -12,7 +12,7 @@ import time
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%}
 
 
-def plot_fase_banco(FaseBanco, column_hue='cut', text_hue=None, cmap='plasma', show_block_label=True, show_grid=True, xsize = 10, ysize = 10, highlight_blocks=[], points=[], arrows=[], sectors=[]):
+def plot_fase_banco(FaseBanco, block_width=10, block_height=10, column_hue='cut', text_hue=None, cmap='plasma', show_block_label=True, show_grid=True, xsize = 10, ysize = 10, highlight_blocks=[], points=[], arrows=[], sectors=[]):
     if FaseBanco.empty:
         print("El DataFrame 'FaseBanco' está vacío. No se puede graficar.")
         return
@@ -51,8 +51,8 @@ def plot_fase_banco(FaseBanco, column_hue='cut', text_hue=None, cmap='plasma', s
         x_center = row['x']
         y_center = row['y']
         block_value = row[column_hue]
-        block_width = 10
-        block_height = 10
+        block_width = block_width
+        block_height = block_height
 
         x_corner = x_center - block_width / 2
         y_corner = y_center - block_height / 2
@@ -127,8 +127,7 @@ def plot_fase_banco(FaseBanco, column_hue='cut', text_hue=None, cmap='plasma', s
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Implementation %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-def Calculate_Adjency_Matrix(FaseBanco, BlockWidth, Sectores=[]):
+def Calculate_Adjency_Matrix(FaseBanco, BlockWidth, BlockHeight, Sectores=[]):
     '''
     Crea la matriz de adyacencia de los bloques de la fase-banco respecto a sus coordenadas x e y.
     Devuelve una matriz sparse (CSR).
@@ -141,9 +140,9 @@ def Calculate_Adjency_Matrix(FaseBanco, BlockWidth, Sectores=[]):
     Y1 = matlib.repmat(y.reshape(len(y),1), 1, len(y))
     Y2 = Y1.T
 
-    D = np.sqrt((X1 - X2)**2 + (Y1 - Y2)**2)
+    D = np.sqrt((1/BlockWidth**2)*(X1 - X2)**2 + (1/BlockHeight**2)*(Y1 - Y2)**2)
 
-    adjency_matrix = (D <= BlockWidth) & (D > 0)
+    adjency_matrix = (D <= 1) & (D > 0)
     adjency_matrix = sp.sparse.csr_matrix(adjency_matrix).astype(int)
 
     if Sectores:
@@ -183,7 +182,7 @@ def Calculate_Similarity_Matrix(
         penalizacion_roca = 0.9,
         peso_directional_mining = 0.25,
         tol_ley = 0.01,
-        tol_directional_mining = 0.01,
+        tol_directional_mining = 0.001,
         P_inicio = (-1,-1),
         P_final = (1,1)
         ):
@@ -228,17 +227,20 @@ def Calculate_Similarity_Matrix(
     T = np.ones((n,n)) - (1-penalizacion_destino)*T*np.ones((n,n))
 
     # Tipo Roca/Material
-    rock = FaseBanco['tipomineral'].values
-    R1 = matlib.repmat(rock.reshape(len(rock),1), 1, len(rock))
-    R2 = R1.T
-    R = R1 != R2
+    if 'tipomineral' in FaseBanco.columns:
+        rock = FaseBanco['tipomineral'].values
+        R1 = matlib.repmat(rock.reshape(len(rock),1), 1, len(rock))
+        R2 = R1.T
+        R = R1 != R2
 
-    R = np.ones((n,n)) - (1-penalizacion_roca)*R*np.ones((n,n))
+        R = np.ones((n,n)) - (1-penalizacion_roca)*R*np.ones((n,n))
+    else:
+        R = 1
 
     # Dirección de minería
     M1 = (X1 - P_inicio[0])**2 + (Y1 - P_inicio[1])**2
     M2 = (X1 - P_final[0])**2 + (Y1 - P_final[1])**2
-    Mi = np.multiply( np.sign( M1 - M2 ), np.sqrt( np.abs(M1 - M2)) )
+    Mi = np.multiply( np.sign( M1 - M2 ), np.sqrt( np.abs(M1 - M2 )) )
     DM = np.maximum(np.abs(Mi - Mi.T), tol_directional_mining)
 
     NDM = DM / np.max(DM)
@@ -406,6 +408,7 @@ def Clustering_Tabesh(
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 
+
 def Shape_Refinement_Tabesh(FaseBanco, AdjencyMatrix, Min_Cluster_Length = 10, Iterations_PostProcessing=5, Reset_Clusters_Index=False):
     fase_banco = FaseBanco.copy()
     execution_time = 0
@@ -448,8 +451,8 @@ def Shape_Refinement_Mod(FaseBanco, AdjencyMatrix, Min_Cluster_Length = 10, Iter
     max_i_cluster = fase_banco['cluster'].max() + 1
     t1 = time.time()
     for i in ID_Small_Clusters:
-        Blocks = fase_banco.loc[fase_banco['cluster'] == i, 'cluster'].index
-        for j in Blocks:
+        blocks = fase_banco.loc[fase_banco['cluster'] == i, 'cluster'].index
+        for j in blocks:
             fase_banco.loc[j, 'cluster'] = max_i_cluster
             max_i_cluster += 1
 
@@ -509,7 +512,6 @@ def Shape_Refinement_Mod(FaseBanco, AdjencyMatrix, Min_Cluster_Length = 10, Iter
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Automatic Creation of Cluster's Precedences %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-# Verificar adyacencia y angulo (prod interno) para crear precedencias
 def Clusters_Vecinos(FaseBanco, Cluster, AdjencyMatrix):
     Blocks = FaseBanco.loc[FaseBanco['cluster'] == Cluster].index
     rows, cols = AdjencyMatrix.nonzero()
@@ -521,7 +523,7 @@ def Clusters_Vecinos(FaseBanco, Cluster, AdjencyMatrix):
                     Clusters_Vecinos.append(FaseBanco.iloc[cols[j]]['cluster'].astype(int))
     return Clusters_Vecinos
 
-def Precedencias_Clusters_Angle(FaseBanco, P_inicio, P_final):
+def Precedencias_Clusters_Angle(FaseBanco, P_inicio, P_final, BlockWidth, BlockHeight):
     fase_banco = FaseBanco.copy()
     ID_Clusters = fase_banco['cluster'].unique()
     Num_Clusters = len(ID_Clusters)
@@ -534,7 +536,7 @@ def Precedencias_Clusters_Angle(FaseBanco, P_inicio, P_final):
     
     distancias_al_inicio = {}
     Clusters_Ordenados = {}
-    adjency_matrix = Calculate_Adjency_Matrix(fase_banco, 10)
+    adjency_matrix = Calculate_Adjency_Matrix(fase_banco, BlockWidth, BlockHeight)
 
     for id in Centers.keys():
         d = np.sqrt( (Centers[id][0] - P_inicio[0])**2 + (Centers[id][1] - P_inicio[1])**2 )
@@ -569,7 +571,7 @@ def Precedencias_Clusters_Angle(FaseBanco, P_inicio, P_final):
     execution_time= t2-t1
     return Clusters_Ordenados, Centers, execution_time
 
-def Precedencias_Clusters_Agend(FaseBanco, P_inicio, P_final):
+def Precedencias_Clusters_Agend(FaseBanco, P_inicio, P_final, BlockWidth, BlockHeight):
     fase_banco = FaseBanco.copy()
     ID_Clusters = fase_banco['cluster'].unique()
     Num_Clusters = len(ID_Clusters)
@@ -582,7 +584,7 @@ def Precedencias_Clusters_Agend(FaseBanco, P_inicio, P_final):
     
     distancias_al_inicio = {}
     Clusters_Ordenados = {}
-    adjency_matrix = Calculate_Adjency_Matrix(fase_banco, 10)
+    adjency_matrix = Calculate_Adjency_Matrix(fase_banco, BlockWidth, BlockHeight)
 
     for id in Centers.keys():
         d = np.sqrt( (Centers[id][0] - P_inicio[0])**2 + (Centers[id][1] - P_inicio[1])**2 )
@@ -622,23 +624,28 @@ def Precedencias_Clusters_Agend(FaseBanco, P_inicio, P_final):
     return Clusters_Ordenados, Centers, execution_time
 
 
+
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Metrics %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 def Rock_Unity(FaseBanco):
-    ID_Clusters = np.sort(FaseBanco['cluster'].unique())
-    num_clusters = len(ID_Clusters)
-    sum_rock_unity = 0
-    RU_distribution = []
-    for id in ID_Clusters:
-        Cluster = FaseBanco.loc[FaseBanco['cluster']==id]
-        n_cluster = len(Cluster)
-        max_rock = Cluster['tipomineral'].value_counts().max()
-        ru = max_rock/n_cluster
-        sum_rock_unity += ru
-        RU_distribution.append(ru)
-    RU = sum_rock_unity/num_clusters
+    if 'tipomineral' in FaseBanco.columns:
+        ID_Clusters = np.sort(FaseBanco['cluster'].unique())
+        num_clusters = len(ID_Clusters)
+        sum_rock_unity = 0
+        RU_distribution = []
+        for id in ID_Clusters:
+            Cluster = FaseBanco.loc[FaseBanco['cluster']==id]
+            n_cluster = len(Cluster)
+            max_rock = Cluster['tipomineral'].value_counts().max()
+            ru = max_rock/n_cluster
+            sum_rock_unity += ru
+            RU_distribution.append(ru)
+        RU = sum_rock_unity/num_clusters
+    else:
+        RU = 1
+        RU_distribution = 1
     return RU, RU_distribution
 
 def Destination_Dilution_Factor(FaseBanco):
@@ -669,9 +676,11 @@ def Coefficient_Variation(FaseBanco):
         else:
             std = Cluster['cut'].std()
             mean = Cluster['cut'].mean()
-            cv = std/mean
+            if mean == 0:
+                cv = 0
+            else:
+                cv = std/mean
         sum_cv += cv
-        print(cv)
         CV_distribution.append(cv)
     CV = sum_cv/num_clusters
     return CV, CV_distribution
