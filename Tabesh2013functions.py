@@ -12,11 +12,13 @@ import time
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%}
 
 
-def plot_fase_banco(FaseBanco, column_hue='cut', cmap='plasma', show_block_label=True, show_grid=True, xsize = 10, ysize = 10, highlight_blocks=[], points=[], arrows=[], sectors=[]):
+def plot_fase_banco(FaseBanco, column_hue='cut', text_hue=None, cmap='plasma', show_block_label=True, show_grid=True, xsize = 10, ysize = 10, highlight_blocks=[], points=[], arrows=[], sectors=[]):
     if FaseBanco.empty:
         print("El DataFrame 'FaseBanco' está vacío. No se puede graficar.")
         return
-    
+    if not text_hue:
+        text_hue = column_hue
+
     fig, ax = plt.subplots(figsize=(xsize, ysize), dpi=100)
     norm = None
     colormap = None
@@ -63,11 +65,12 @@ def plot_fase_banco(FaseBanco, column_hue='cut', cmap='plasma', show_block_label
         rect = patches.Rectangle((x_corner, y_corner), block_width, block_height, linewidth=0.5, edgecolor='black', facecolor=color)
         ax.add_patch(rect)
         if show_block_label:
-            if is_continuous:
-                block_value = np.trunc(block_value*10)/10
+            block_text = row[text_hue]
+            if text_hue in variables_continuas:
+                block_text = np.trunc(block_text*10)/10
             else:
-                block_value = int(block_value)
-            ax.text(x_center, y_center, str(block_value), ha='center', va='center', fontsize=8, color='black')
+                block_text = int(block_text)
+            ax.text(x_center, y_center, str(block_text), ha='center', va='center', fontsize=8, color='black')
     
     if is_continuous:
         x_min = FaseBanco['x'].min() - 5*block_width
@@ -96,7 +99,7 @@ def plot_fase_banco(FaseBanco, column_hue='cut', cmap='plasma', show_block_label
 
     for a in arrows:
         P1, P2 = a
-        ax.annotate('DM', xy=P2, xytext=P1, arrowprops=dict(arrowstyle='->', color='blue', lw=2, mutation_scale=15))
+        ax.annotate('', xy=P2, xytext=P1, arrowprops=dict(arrowstyle='->', color='blue', lw=2, mutation_scale=15))
     
     sector_count = 1
     for s in sectors:
@@ -235,7 +238,7 @@ def Calculate_Similarity_Matrix(
     # Dirección de minería
     M1 = (X1 - P_inicio[0])**2 + (Y1 - P_inicio[1])**2
     M2 = (X1 - P_final[0])**2 + (Y1 - P_final[1])**2
-    Mi = np.multiply( np.sign( M1 - M2 ), np.sqrt( np.abs(M1 - M2 )) )
+    Mi = np.multiply( np.sign( M1 - M2 ), np.sqrt( np.abs(M1 - M2)) )
     DM = np.maximum(np.abs(Mi - Mi.T), tol_directional_mining)
 
     NDM = DM / np.max(DM)
@@ -445,8 +448,8 @@ def Shape_Refinement_Mod(FaseBanco, AdjencyMatrix, Min_Cluster_Length = 10, Iter
     max_i_cluster = fase_banco['cluster'].max() + 1
     t1 = time.time()
     for i in ID_Small_Clusters:
-        blocks = fase_banco.loc[fase_banco['cluster'] == i, 'cluster'].index
-        for j in blocks:
+        Blocks = fase_banco.loc[fase_banco['cluster'] == i, 'cluster'].index
+        for j in Blocks:
             fase_banco.loc[j, 'cluster'] = max_i_cluster
             max_i_cluster += 1
 
@@ -506,34 +509,117 @@ def Shape_Refinement_Mod(FaseBanco, AdjencyMatrix, Min_Cluster_Length = 10, Iter
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Automatic Creation of Cluster's Precedences %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-def Precedencias_Clusters_1(FaseBanco, P_inicio, P_final):
-    ID_Clusters = FaseBanco['cluster'].unique()
-    Distancias_Clusters = {}
-    for id in ID_Clusters:
-        Cluster = FaseBanco.loc[FaseBanco['cluster']==id]
-        P_center = (Cluster['x'].mean(), Cluster['y'].mean())
-        di = np.sqrt( (P_inicio[0] - P_center[0])**2 + (P_inicio[1] - P_center[1])**2 )
-        df = np.sqrt( (P_final[0] - P_center[0])**2 + (P_final[1] - P_center[1])**2 )
-        L = np.sqrt( (P_inicio[0] - P_final[0])**2 + (P_inicio[1] - P_final[1])**2 )
-        D = (di**2 + L**2 - df**2)/(2*L)
-        Distancias_Clusters[id] = (D, P_center)
-    
-    Clusters_Ordenados = sorted(Distancias_Clusters.items(), key=lambda item: item[1])
-    Clusters_Ordenados = dict(Clusters_Ordenados)
-    return Clusters_Ordenados
+# Verificar adyacencia y angulo (prod interno) para crear precedencias
+def Clusters_Vecinos(FaseBanco, Cluster, AdjencyMatrix):
+    Blocks = FaseBanco.loc[FaseBanco['cluster'] == Cluster].index
+    rows, cols = AdjencyMatrix.nonzero()
+    Clusters_Vecinos = []
+    for b in Blocks:
+            b_is_row = np.where(rows == b)[0]
+            for j in b_is_row:
+                if FaseBanco.iloc[b]['cluster'] != FaseBanco.iloc[cols[j]]['cluster']:
+                    Clusters_Vecinos.append(FaseBanco.iloc[cols[j]]['cluster'].astype(int))
+    return Clusters_Vecinos
 
-def Precedencias_Clusters_2(FaseBanco, P_inicio):
-    ID_Clusters = FaseBanco['cluster'].unique()
-    Distancias_Clusters = {}
+def Precedencias_Clusters_Angle(FaseBanco, P_inicio, P_final):
+    fase_banco = FaseBanco.copy()
+    ID_Clusters = fase_banco['cluster'].unique()
+    Num_Clusters = len(ID_Clusters)
+    Centers = {}
+    t1 = time.time()
     for id in ID_Clusters:
-        Cluster = FaseBanco.loc[FaseBanco['cluster']==id]
+        Cluster = fase_banco.loc[fase_banco['cluster']==id]
         P_center = (Cluster['x'].mean(), Cluster['y'].mean())
-        di = np.sqrt( (P_inicio[0] - P_center[0])**2 + (P_inicio[1] - P_center[1])**2 )
-        Distancias_Clusters[id] = (di, P_center)
+        Centers[id] = P_center
     
-    Clusters_Ordenados = sorted(Distancias_Clusters.items(), key=lambda item: item[1])
-    Clusters_Ordenados = dict(Clusters_Ordenados)
-    return Clusters_Ordenados
+    distancias_al_inicio = {}
+    Clusters_Ordenados = {}
+    adjency_matrix = Calculate_Adjency_Matrix(fase_banco, 10)
+
+    for id in Centers.keys():
+        d = np.sqrt( (Centers[id][0] - P_inicio[0])**2 + (Centers[id][1] - P_inicio[1])**2 )
+        distancias_al_inicio[id] = d
+        
+    distancias_al_inicio = sorted(distancias_al_inicio.items(), key=lambda item: item[1])
+    distancias_al_inicio = dict(distancias_al_inicio)
+    Clusters_Ordenados[list(distancias_al_inicio.keys())[0]] = np.array([], dtype=int)
+    Clusters_Candidatos = set()
+    vector_dir_min = ( P_final[0]-P_inicio[0], P_final[1]-P_inicio[1] )
+
+    for iterations in range(Num_Clusters-1):
+        prev_cluster = list(Clusters_Ordenados.keys())[iterations]
+        Clusters_Vecinos_prev_cluster = Clusters_Vecinos(fase_banco, prev_cluster, adjency_matrix)
+
+        Clusters_Candidatos.update(Clusters_Vecinos_prev_cluster)
+        for c in Clusters_Ordenados.keys():
+            Clusters_Candidatos.discard(c)
+
+        sub_distancias = {k: distancias_al_inicio[k] for k in Clusters_Candidatos}
+        next_cluster = min(sub_distancias, key=sub_distancias.get)
+        Precedencias = []
+
+        Clusters_Vecinos_next_cluster = Clusters_Vecinos(fase_banco, next_cluster, adjency_matrix)
+        for cluster in Clusters_Ordenados.keys():
+            v1 = ( Centers[cluster][0]-Centers[next_cluster][0], Centers[cluster][1]-Centers[next_cluster][1] )
+            product = vector_dir_min[0]*v1[0] + vector_dir_min[1]*v1[1]
+            if product < 0 and (cluster in Clusters_Vecinos_next_cluster):
+                Precedencias.append(cluster)
+        Clusters_Ordenados[next_cluster] = np.array(Precedencias, dtype=int)
+    t2 = time.time()
+    execution_time= t2-t1
+    return Clusters_Ordenados, Centers, execution_time
+
+def Precedencias_Clusters_Agend(FaseBanco, P_inicio, P_final):
+    fase_banco = FaseBanco.copy()
+    ID_Clusters = fase_banco['cluster'].unique()
+    Num_Clusters = len(ID_Clusters)
+    Centers = {}
+    t1 = time.time()
+    for id in ID_Clusters:
+        Cluster = fase_banco.loc[fase_banco['cluster']==id]
+        P_center = (Cluster['x'].mean(), Cluster['y'].mean())
+        Centers[id] = P_center
+    
+    distancias_al_inicio = {}
+    Clusters_Ordenados = {}
+    adjency_matrix = Calculate_Adjency_Matrix(fase_banco, 10)
+
+    for id in Centers.keys():
+        d = np.sqrt( (Centers[id][0] - P_inicio[0])**2 + (Centers[id][1] - P_inicio[1])**2 )
+        distancias_al_inicio[id] = d
+        
+    distancias_al_inicio = sorted(distancias_al_inicio.items(), key=lambda item: item[1])
+    distancias_al_inicio = dict(distancias_al_inicio)
+    # Clusters_Ordenados[list(distancias_al_inicio.keys())[0]] = np.array([], dtype=int)
+    Clusters_Ordenados[list(distancias_al_inicio.keys())[0]] = []
+    Clusters_Candidatos = set()
+
+    for iterations in range(Num_Clusters-1):
+        prev_cluster = list(Clusters_Ordenados.keys())[iterations]
+        Clusters_Vecinos_prev_cluster = Clusters_Vecinos(fase_banco, prev_cluster, adjency_matrix)
+
+        Clusters_Candidatos.update(Clusters_Vecinos_prev_cluster)
+        for c in Clusters_Ordenados.keys():
+            Clusters_Candidatos.discard(c)
+
+        sub_distancias = {k: distancias_al_inicio[k] for k in Clusters_Candidatos}
+        if not sub_distancias:
+            resto = set(ID_Clusters).difference(set(Clusters_Ordenados.keys()))
+            sub_distancias = {k: distancias_al_inicio[k] for k in resto}
+            next_cluster = min(sub_distancias, key=sub_distancias.get)
+        else:
+            next_cluster = min(sub_distancias, key=sub_distancias.get)
+        Precedencias = []
+
+        Clusters_Vecinos_next_cluster = Clusters_Vecinos(fase_banco, next_cluster, adjency_matrix)
+        for cluster in Clusters_Ordenados.keys():
+            if (cluster in list(Clusters_Ordenados.keys())) and (cluster in Clusters_Vecinos_next_cluster):
+                Precedencias.append(cluster)
+        # Clusters_Ordenados[next_cluster] = np.array(Precedencias, dtype=int)
+        Clusters_Ordenados[next_cluster] = Precedencias
+    t2 = time.time()
+    execution_time = t2-t1
+    return Clusters_Ordenados, Centers, execution_time
 
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -578,10 +664,14 @@ def Coefficient_Variation(FaseBanco):
     CV_distribution = []
     for id in ID_Clusters:
         Cluster = FaseBanco.loc[FaseBanco['cluster']==id]
-        std = Cluster['cut'].std()
-        mean = Cluster['cut'].mean()
-        cv = std/mean
+        if len(Cluster)==1:
+            cv = 0
+        else:
+            std = Cluster['cut'].std()
+            mean = Cluster['cut'].mean()
+            cv = std/mean
         sum_cv += cv
+        print(cv)
         CV_distribution.append(cv)
     CV = sum_cv/num_clusters
     return CV, CV_distribution
