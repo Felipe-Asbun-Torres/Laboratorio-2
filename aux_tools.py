@@ -8,7 +8,9 @@ import matplotlib.colors as mcolors
 import plotly.express as px
 import plotly.graph_objects as go
 import plotly.colors
-
+import numpy.matlib as matlib
+import scipy as sp
+from collections import defaultdict
 
 def plot_mine_blocks_adv(df,
                          color_by_col,
@@ -951,3 +953,57 @@ def plot_phase_clusters_3d_interactive_bancos(df_clustered, phase_to_plot,
 
     # 7. Mostrar gráfico
     fig.show()
+
+def Calculate_Arcs(df_sup, df_inf, BlockWidth=10, arcs=defaultdict(list)):
+    '''
+    Asume que el df_inf corresponde a la fase banco inferior a df_sup
+    '''
+    x1 = df_sup['x'].values
+    y1 = df_sup['y'].values
+    x2 = df_inf['x'].values
+    y2 = df_inf['y'].values
+
+    X1 = matlib.repmat(x1.reshape(len(x1), 1), 1, len(x2))  # (n_sup, n_inf)
+    X2 = matlib.repmat(x2.reshape(1, len(x2)), len(x1), 1)  # (n_sup, n_inf)
+
+    Y1 = matlib.repmat(y1.reshape(len(y1), 1), 1, len(y2))  # (n_sup, n_inf)
+    Y2 = matlib.repmat(y2.reshape(1, len(y2)), len(y1), 1)  # (n_sup, n_inf)
+
+    D = np.sqrt((X1 - X2)**2 + (Y1 - Y2)**2)
+
+    adjency_matrix = (D <= BlockWidth) & (D > 0)
+    adjency_matrix = sp.sparse.csr_matrix(adjency_matrix).astype(int)
+
+        # Obtener clusters únicos y sus índices
+    clusters_sup = df_sup['cluster'].unique()
+    clusters_inf = df_inf['cluster'].unique()
+
+    cluster_sup_to_idx = {c: i for i, c in enumerate(clusters_sup)}
+    cluster_inf_to_idx = {c: i for i, c in enumerate(clusters_inf)}
+
+    n_sup = len(clusters_sup)
+    n_inf = len(clusters_inf)
+
+    # Inicializar matriz de adyacencia entre clusters
+    A_clusters = np.zeros((n_sup, n_inf), dtype=int)
+
+    # Recorrer los pares adyacentes entre bloques
+    rows, cols = adjency_matrix.nonzero()  # A_block: sup x inf
+    for i_sup, i_inf in zip(rows, cols):
+        c_sup = df_sup.iloc[i_sup]['cluster']
+        c_inf = df_inf.iloc[i_inf]['cluster']
+
+        idx_sup = cluster_sup_to_idx[c_sup]
+        idx_inf = cluster_inf_to_idx[c_inf]
+
+        A_clusters[idx_sup, idx_inf] = 1
+    f_inf = df_inf['fase'][0]
+    b_inf = df_inf['banco'][0]
+    f_sup = df_sup['fase'][0]
+    b_sup = df_sup['banco'][0]
+    for i in range(A_clusters.shape[1]):  # i: índice de clusters inferiores
+        for j in range(A_clusters.shape[0]):  # j: índice de clusters superiores
+            if A_clusters.T[i][j] == 1:
+                arcs[(f_inf, b_inf, i + 1)].append((f_sup, b_sup, j + 1))
+
+    return arcs
