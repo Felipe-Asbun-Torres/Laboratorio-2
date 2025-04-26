@@ -627,18 +627,22 @@ def Precedencias_Clusters_Agend(FaseBanco, P_inicio, P_final):
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 def Rock_Unity(FaseBanco):
-    ID_Clusters = np.sort(FaseBanco['cluster'].unique())
-    num_clusters = len(ID_Clusters)
-    sum_rock_unity = 0
-    RU_distribution = []
-    for id in ID_Clusters:
-        Cluster = FaseBanco.loc[FaseBanco['cluster']==id]
-        n_cluster = len(Cluster)
-        max_rock = Cluster['tipomineral'].value_counts().max()
-        ru = max_rock/n_cluster
-        sum_rock_unity += ru
-        RU_distribution.append(ru)
-    RU = sum_rock_unity/num_clusters
+    if 'tipomineral' in FaseBanco.columns:
+        ID_Clusters = np.sort(FaseBanco['cluster'].unique())
+        num_clusters = len(ID_Clusters)
+        sum_rock_unity = 0
+        RU_distribution = []
+        for id in ID_Clusters:
+            Cluster = FaseBanco.loc[FaseBanco['cluster']==id]
+            n_cluster = len(Cluster)
+            max_rock = Cluster['tipomineral'].value_counts().max()
+            ru = max_rock/n_cluster
+            sum_rock_unity += ru
+            RU_distribution.append(ru)
+        RU = sum_rock_unity/num_clusters
+    else:
+        RU = 1
+        RU_distribution = 1
     return RU, RU_distribution
 
 def Destination_Dilution_Factor(FaseBanco):
@@ -669,9 +673,11 @@ def Coefficient_Variation(FaseBanco):
         else:
             std = Cluster['cut'].std()
             mean = Cluster['cut'].mean()
-            cv = std/mean
+            if mean == 0:
+                cv = 0
+            else:
+                cv = std/mean
         sum_cv += cv
-        print(cv)
         CV_distribution.append(cv)
     CV = sum_cv/num_clusters
     return CV, CV_distribution
