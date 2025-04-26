@@ -30,7 +30,9 @@ def plot_mine_blocks_adv(df,
                          xlim=None, ylim=None,
                          show_grid=True,
                          show_block_labels=False,
-                         fontsize_block_label=6):
+                         fontsize_block_label=6,
+                         save=False,
+                         save_name='output.png'):
     """
     Genera un gráfico de vista de planta de bloques, adaptándose a datos
     categóricos (con leyenda) o continuos (con barra de color/heatmap).
@@ -209,7 +211,10 @@ def plot_mine_blocks_adv(df,
              plt.tight_layout()
 
 
-    plt.show()
+    if save:
+        plt.savefig(save_name, dpi=300)
+    else:
+        plt.show()
 
 #############################################################
 #############       Clustering Jerarquico       #############
@@ -241,7 +246,7 @@ def construir_matriz_adyacencia(df_banco, distancia=10.0):
              print(f"Advertencia: Índice inválido {i} o {j} de query_pairs.")
 
     # print(f"  Matriz de adyacencia construida para banco. {len(vecinos)} pares adyacentes.")
-    return A, df_banco_reset
+    return A
 
 # --- Nueva Función de Similitud con Penalización Opcional ---
 def calcular_matriz_similitud_con_penalizacion(
@@ -563,13 +568,14 @@ def cluster_mina_por_fase_banco(
     wd, wg, r,                # Parámetros de similitud base
     penalty_factor_c,         # Penalización vertical (0 < c < 1)
     banco_col='banco'         # Nombre de la columna que identifica el banco/nivel Z
+
 ):
     """
     Orquesta el proceso de clustering iterando por fase y luego por banco (desc).
     Aplica penalización vertical en bancos subsiguientes dentro de una fase.
     """
     # Añadir columna para almacenar el ID del cluster final asignado a cada bloque
-    df_mina['final_cluster_id'] = -1 # -1 indica no asignado inicialmente
+    df_mina['cluster'] = -1 # -1 indica no asignado inicialmente
     df_mina['final_cluster_label'] = "None" # Etiqueta más descriptiva
 
     # Diccionario para guardar los resultados detallados por si se necesitan
@@ -669,7 +675,7 @@ def cluster_mina_por_fase_banco(
                          for block_id in cluster_data['blocks']:
                              current_bench_cluster_map[block_id] = cluster_label # Mapeo para el siguiente banco
                              # Asignar al DataFrame principal usando la etiqueta global
-                             df_mina.loc[df_mina['id'] == block_id, 'final_cluster_id'] = cluster_label # Guarda el ID local del banco
+                             df_mina.loc[df_mina['id'] == block_id, 'cluster'] = cluster_label # Guarda el ID local del banco
                              df_mina.loc[df_mina['id'] == block_id, 'final_cluster_label'] = global_cluster_label # Guarda etiqueta global
 
 
@@ -686,140 +692,9 @@ def cluster_mina_por_fase_banco(
     return df_mina, all_clusters_info
 
 
-
-def cluster_mina_por_fase_banco2(
-    df_mina,                  # DataFrame completo
-    fases_a_procesar,         # Lista de fases a procesar
-    max_cluster_size,
-    target_num_clusters_per_bench, # Asume target fijo por banco
-    distancia_adyacencia,
-    wd, wg, r,                # Parámetros de similitud base
-    penalty_factor_c,         # Penalización vertical (0 < c < 1)
-    banco_col='banco'         # Nombre de la columna que identifica el banco/nivel Z
-):
-    """
-    Orquesta el proceso de clustering iterando por fase y luego por banco (desc).
-    Aplica penalización vertical en bancos subsiguientes dentro de una fase.
-    """
-    # Añadir columna para almacenar el ID del cluster final asignado a cada bloque
-    df_mina['final_cluster_id'] = -1 # -1 indica no asignado inicialmente
-    df_mina['final_cluster_label'] = "None" # Etiqueta más descriptiva
-
-    # Diccionario para guardar los resultados detallados por si se necesitan
-    all_clusters_info = {}
-
-    # Asegurarse que la columna de banco existe
-    if banco_col not in df_mina.columns:
-        print(f"Error: La columna de banco '{banco_col}' no existe en el DataFrame.")
-        return df_mina, all_clusters_info
-
-    for phase in fases_a_procesar:
-        print(f"\n--- Procesando Fase {phase} ---")
-        # Filtrar por fase y asegurarse que la columna ID existe
-        if 'id' not in df_mina.columns:
-             print("Error: Se requiere una columna 'id' única para cada bloque.")
-             continue # Saltar esta fase
-        df_phase = df_mina[df_mina['fase'] == phase].copy()
-        if df_phase.empty:
-            print(f"  Fase {phase}: No se encontraron bloques.")
-            continue
-
-        # Obtener y ordenar bancos (niveles Z) de mayor a menor
-        benches = sorted(df_phase[banco_col].unique(), reverse=True)
-        print(f"  Fase {phase}: Bancos a procesar (descendente): {benches}")
-
-        previous_bench_clusters = None # Reiniciar para la nueva fase {original_id: cluster_label}
-        df_previous_banco = None       # DataFrame del banco anterior procesado
-
-        for i, current_banco_level in enumerate(benches):
-            is_first_bench = (i == 0)
-            print(f"\n  -- Procesando Banco {current_banco_level} (Fase {phase}) {'[PRIMERO]' if is_first_bench else ''} --")
-
-            # Filtrar DataFrame para el banco actual
-            df_current_banco = df_phase[df_phase[banco_col] == current_banco_level].copy()
-            if df_current_banco.empty:
-                print(f"   Banco {current_banco_level}: No se encontraron bloques.")
-                # ¿Qué hacer con previous_bench_clusters? Mantener el anterior? Resetear?
-                # Resetear es más seguro si hay bancos vacíos intermedios.
-                previous_bench_clusters = None
-                df_previous_banco = None
-                continue # Saltar al siguiente banco
-
-            # 1. Calcular Adyacencia (siempre necesaria)
-            A_current, df_current_processed = construir_matriz_adyacencia(df_current_banco, distancia_adyacencia)
-            if A_current is None:
-                print(f"   Banco {current_banco_level}: Error calculando adyacencia. Saltando banco.")
-                previous_bench_clusters = None # Resetear por seguridad
-                df_previous_banco = None
-                continue
-
-            n_current = len(df_current_processed)
-            if n_current <= target_num_clusters_per_bench:
-                 print(f"   Banco {current_banco_level}: Número de bloques ({n_current}) <= target ({target_num_clusters_per_bench}). Asignando clusters individuales.")
-                 # Asignar cada bloque a su propio cluster
-                 current_bench_cluster_map = {row['id']: idx+1 for idx, row in df_current_processed.iterrows()}
-                 # Simular salida de clustering para consistencia
-                 current_final_clusters = [{'cluster_internal_id': idx, 'blocks': {row['id']}, 'size': 1}
-                                          for idx, row in df_current_processed.iterrows()]
-            else:
-                # 2. Calcular Similitud (con o sin penalización)
-                S_current = None
-                block_below_map = {} # Vacío si es el primer banco
-
-                if is_first_bench:
-                    print(f"   Banco {current_banco_level}: Calculando similitud estándar.")
-                    S_current = calcular_matriz_similitud_completa(df_current_processed, wd=wd, wg=wg, r=r) # Usa la versión original sin penalización
-                else:
-                    print(f"   Banco {current_banco_level}: Calculando similitud con penalización c={penalty_factor_c}.")
-                    # Encontrar mapeo de bloques inferiores (¡IMPLEMENTACIÓN CRÍTICA!)
-                    block_below_map = find_block_below_mapping(df_current_processed, df_previous_banco, bench_col=banco_col)
-                    S_current = calcular_matriz_similitud_con_penalizacion(
-                        df_current_processed,
-                        previous_bench_clusters,
-                        block_below_map,
-                        penalty_factor_c=penalty_factor_c,
-                        wd=wd, wg=wg, r=r
-                    )
-
-                # 3. Ejecutar Clustering
-                print(f"   Banco {current_banco_level}: Ejecutando clustering para {n_current} bloques...")
-                current_final_clusters = hierarchical_mine_clustering_adaptado2(
-                    df_processed=df_current_processed, # DF con índice 0..N-1
-                    initial_adjacency_matrix=A_current,
-                    similarity_matrix=S_current,
-                    max_cluster_size=max_cluster_size,
-                    target_num_clusters=target_num_clusters_per_bench
-                )
-
-                # 4. Procesar y almacenar resultados
-                if current_final_clusters:
-                     print(f"   Banco {current_banco_level}: Clustering completado. {len(current_final_clusters)} clusters encontrados.")
-                     current_bench_cluster_map = {}
-                     for cluster_idx, cluster_data in enumerate(current_final_clusters):
-                         cluster_label = cluster_idx + 1 # Etiqueta 1..K para este banco
-                         # Crear una etiqueta global única (opcional pero recomendado)
-                         global_cluster_label = f"F{phase}_B{current_banco_level}_C{cluster_label}"
-                         for block_id in cluster_data['blocks']:
-                             current_bench_cluster_map[block_id] = cluster_label # Mapeo para el siguiente banco
-                             # Asignar al DataFrame principal usando la etiqueta global
-                             df_mina.loc[df_mina['id'] == block_id, 'final_cluster_id'] = cluster_label # Guarda el ID local del banco
-                             df_mina.loc[df_mina['id'] == block_id, 'final_cluster_label'] = global_cluster_label # Guarda etiqueta global
-
-
-                     all_clusters_info[(phase, current_banco_level)] = current_final_clusters # Guardar detalles
-                     # Actualizar para la próxima iteración
-                     previous_bench_clusters = current_bench_cluster_map
-                     df_previous_banco = df_current_processed.copy() # Guardar DF procesado para el mapeo inferior
-                else:
-                     print(f"   Banco {current_banco_level}: Clustering falló o no produjo clusters.")
-                     previous_bench_clusters = None # Resetear si falla
-                     df_previous_banco = None
-
-    print("\n--- Proceso de Clustering Secuencial por Fase y Banco Completado ---")
-    return df_mina, all_clusters_info
 # --- Función de Similitud Original (sin penalización) ---
 # (Necesaria para el primer banco de cada fase)
-def calcular_matriz_similitud_completa(df_banco, wd=2, wg=2, r=0.2):
+def Calculate_Similarity_Matrix(df_banco, wd=2, wg=2, r=0.2):
     N = len(df_banco)
     S = np.full((N, N), np.inf, dtype=float)
     if not all(col in df_banco.columns for col in ['x', 'y', 'cut', 'tipomineral']): return S
@@ -956,7 +831,7 @@ def plot_phase_clusters_3d_interactive_bancos(df_clustered, phase_to_plot,
 
 def Calculate_Arcs(df_sup, df_inf, BlockWidth=10, arcs=defaultdict(list)):
     '''
-    Asume que el df_inf corresponde a la fase banco inferior a df_sup
+    Asume que el df_inf corresponde a la fase banco inferior a df_sup, calcula los arcos de precedencia verticales
     '''
     x1 = df_sup['x'].values
     y1 = df_sup['y'].values
@@ -1007,3 +882,126 @@ def Calculate_Arcs(df_sup, df_inf, BlockWidth=10, arcs=defaultdict(list)):
                 arcs[(f_inf, b_inf, i + 1)].append((f_sup, b_sup, j + 1))
 
     return arcs
+
+def Precedencia_Fase_Banco(df):
+    # Obtener los valores únicos ordenados de 'z'
+    sorted_unique_z = np.sort(df['z'].unique())
+
+    # Crear una nueva columna 'nivel' basada en la posición de 'z' en el array ordenado
+    df['nivel'] = df['z'].apply(lambda x: np.where(sorted_unique_z == x)[0][0])
+
+    info_fb = {}
+    fases_a_procesar = np.sort(df['fase'].unique())
+    for f in fases_a_procesar:
+        benches = np.sort(df[df['fase']==f]['banco'].unique())
+        for b in benches:
+            df_inf = df[(df['fase']==f)&(df['banco']==b)].copy()
+            df_inf.reset_index(drop=True, inplace=True)
+            z_level = df_inf['nivel'][0]
+            min_x = df_inf['x'].min()
+            max_x = df_inf['x'].max()
+            min_y = df_inf['y'].min()
+            max_y = df_inf['y'].max()
+            info_fb[(f,b)] = (z_level, min_x, max_x, min_y,max_y)
+
+    # Lista para guardar los pares (f_i, b_i) y (f_j, b_j) que cumplen la condición
+    resultados = []
+
+    # Iterar sobre todos los pares (f1, b1) y (f2, b2)
+    for (f1, b1), (z1, min_x1, max_x1, min_y1, max_y1) in info_fb.items():
+        for (f2, b2), (z2, min_x2, max_x2, min_y2, max_y2) in info_fb.items():
+            # Condición 1: z1 == z2+1
+            if z1 == z2+1:
+                # Condición 2: Los cuadros delimitados por (x, y) se intersectan
+                if (min_x1 <= max_x2 and max_x1 >= min_x2) and (min_y1 <= max_y2 and max_y1 >= min_y2):
+                    resultados.append(((f1, b1), (f2, b2)))
+    return resultados
+def Global_Vertical_Arc_Calculation(df):
+    resultados = Precedencia_Fase_Banco(df)
+    arcs = defaultdict(list)
+    # Iterar
+    for par in resultados:
+        ((f_sup,b_sup),(f_inf,b_inf)) = par
+        df_inf = df[(df['fase']==f_inf)&(df['banco']==b_inf)].copy()
+        df_inf.reset_index(drop=True, inplace=True)
+        df_sup = df[(df['fase']==f_sup)&(df['banco']==b_sup)].copy()
+        df_sup.reset_index(drop=True, inplace=True)
+        arcs = Calculate_Arcs(df_sup,df_inf,arcs=arcs)
+    return arcs
+
+
+
+def Coefficient_Variation(FaseBanco, col='cut'):
+    ID_Clusters = np.sort(FaseBanco['cluster'].dropna().unique())
+    num_clusters = len(ID_Clusters)
+    if num_clusters == 0:
+        return np.nan, []
+
+    sum_cv = 0
+    CV_distribution = []
+    for id in ID_Clusters:
+        Cluster = FaseBanco.loc[FaseBanco['cluster'] == id]
+        if len(Cluster) == 1:
+            cv = 0  # Definimos CV=0 si solo hay un bloque
+        else:
+            std = Cluster[col].std()
+            mean = Cluster[col].mean()
+            if pd.isna(std) or pd.isna(mean) or mean == 0:
+                cv = 0
+            else:
+                cv = std / mean
+        
+        sum_cv += cv
+        CV_distribution.append(cv)
+        
+    CV = sum_cv / num_clusters
+    return CV, CV_distribution
+
+
+
+def Calculate_Vertical_Adyacency_Matrix(df_sup, df_inf, BlockWidth=10, arcs=defaultdict(list), cluster_col='cluster'):
+    '''
+    Asume que el df_inf corresponde a la fase banco inferior a df_sup, calcula los arcos de precedencia verticales
+    '''
+    x1 = df_sup['x'].values
+    y1 = df_sup['y'].values
+    x2 = df_inf['x'].values
+    y2 = df_inf['y'].values
+
+    X1 = matlib.repmat(x1.reshape(len(x1), 1), 1, len(x2))  # (n_sup, n_inf)
+    X2 = matlib.repmat(x2.reshape(1, len(x2)), len(x1), 1)  # (n_sup, n_inf)
+
+    Y1 = matlib.repmat(y1.reshape(len(y1), 1), 1, len(y2))  # (n_sup, n_inf)
+    Y2 = matlib.repmat(y2.reshape(1, len(y2)), len(y1), 1)  # (n_sup, n_inf)
+
+    D = np.sqrt((X1 - X2)**2 + (Y1 - Y2)**2)
+
+    adjency_matrix = (D <= BlockWidth) & (D > 0)
+    adjency_matrix = sp.sparse.csr_matrix(adjency_matrix).astype(int)
+
+    # Obtener clusters únicos y sus índices
+    clusters_sup = df_sup[cluster_col].unique()
+    clusters_inf = df_inf[cluster_col].unique()
+
+    cluster_sup_to_idx = {c: i for i, c in enumerate(clusters_sup)}
+    cluster_inf_to_idx = {c: i for i, c in enumerate(clusters_inf)}
+
+    n_sup = len(clusters_sup)
+    n_inf = len(clusters_inf)
+
+    # Inicializar matriz de adyacencia entre clusters
+    A_clusters = np.zeros((n_sup, n_inf), dtype=int)
+
+    # Recorrer los pares adyacentes entre bloques
+    rows, cols = adjency_matrix.nonzero()  # A_block: sup x inf
+    for i_sup, i_inf in zip(rows, cols):
+        c_sup = df_sup.iloc[i_sup][cluster_col]
+        c_inf = df_inf.iloc[i_inf][cluster_col]
+
+        idx_sup = cluster_sup_to_idx[c_sup]
+        idx_inf = cluster_inf_to_idx[c_inf]
+
+        A_clusters[idx_sup, idx_inf] = 1
+
+
+    return A_clusters
