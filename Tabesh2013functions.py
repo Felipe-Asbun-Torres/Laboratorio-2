@@ -11,15 +11,40 @@ import time
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Plotting %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%}
 
-
-def plot_fase_banco(FaseBanco, block_width=10, block_height=10, column_hue='cut', text_hue=None, cmap='plasma', show_block_label=True, show_grid=True, xsize = 10, ysize = 10, highlight_blocks=[], points=[], arrows=[], sectors=[]):
+# Función para graficar fases-bancos en 2D.
+def plot_fase_banco(
+        FaseBanco, 
+        block_width=10, 
+        block_height=10, 
+        column_hue='cut', 
+        text_hue=None, 
+        cmap='plasma', 
+        show_block_label=True, 
+        show_grid=True, 
+        dpi = 100,
+        xsize = 10, 
+        ysize = 10, 
+        highlight_blocks=[], 
+        points=[], 
+        arrows=[], 
+        sectors=[]
+        ):
+    '''
+    Plotea la fase-banco en un gráfico 2D, donde cada bloque es representado como un rectángulo.
+    Los bloques son coloreados de acuerdo a la variable especificada en column_hue.
+    Los bloques pueden ser etiquetados con la variable especificada en text_hue. En caso de no especificar, se utiliza column_hue.
+    Los bloques pueden ser resaltados con highlight_blocks, que es una lista de índices de bloques a resaltar.
+    Se pueden añadir puntos de interés (como los centros de clusters) con points, que es una lista de coordenadas (x,y).
+    Se pueden añadir flechas con arrows, que es una lista de coordenadas (P1,P2) donde P1 es el punto de inicio y P2 es el punto de fin de la flecha.
+    Se pueden añadir sectores con sectors, que es una lista de coordenadas (P1,P2,P3,P4) donde P1, P2, P3 y P4 son los puntos que definen el sector.
+    '''
     if FaseBanco.empty:
         print("El DataFrame 'FaseBanco' está vacío. No se puede graficar.")
         return
     if not text_hue:
         text_hue = column_hue
 
-    fig, ax = plt.subplots(figsize=(xsize, ysize), dpi=100)
+    fig, ax = plt.subplots(figsize=(xsize, ysize), dpi=dpi)
     norm = None
     colormap = None
     color_map_discrete = {}
@@ -130,7 +155,11 @@ def plot_fase_banco(FaseBanco, block_width=10, block_height=10, column_hue='cut'
 def Calculate_Adjency_Matrix(FaseBanco, BlockWidth, BlockHeight, Sectores=[]):
     '''
     Crea la matriz de adyacencia de los bloques de la fase-banco respecto a sus coordenadas x e y.
+    Considera las dimensiones de los bloques con BlockWidth ('x') y BlockHeight ('y').
+    Permite definir sectores, que son listas de coordenadas (P1,P2,P3,P4) que definen los límites de cada sector para
+    clusterizar con fronteras (clustering within boundaries).
     Devuelve una matriz sparse (CSR).
+    En caso de definir sectores, depende de Hadamard_Product_Sparse.
     '''
     x = FaseBanco['x'].values
     y = FaseBanco['y'].values
@@ -187,8 +216,9 @@ def Calculate_Similarity_Matrix(
         P_final = (1,1)
         ):
     '''
-    Calcula la similaridad entre los bloques de la fase-banco, de acuerdo a distancia, ley o destino.
-    No es recomendable que todos los criterios de similaridad sean True y, a su vez, al menos uno de ellos debe ser True.
+    Calcula la similaridad entre los bloques de la fase-banco, de acuerdo a distancia, ley, destino, tipo de roca 
+    y/o dirección de minería.
+    Para no usar un criterio, basta con asignar el valor 0 en el peso o penalización correspondiente.
     Devuelve una matriz densa.
     '''
 
@@ -300,6 +330,7 @@ def Find_Corner_Blocks_Tabesh(FaseBanco, AdjencyMatrix):
     '''
     Encuentra los bloques esquinas de la fase-banco. Utiliza el criterio de Tabesh (2013) para definir los bloques esquinas.
     Devuelve un diccionario cuyas llaves son los bloques esquina y cuyos valores son los clusters con los que es vecino.
+    Sólo se utiliza en Shape_Refinement_Tabesh.
     '''
     n = len(FaseBanco)
     corner_blocks = {}
@@ -410,6 +441,12 @@ def Clustering_Tabesh(
 
 
 def Shape_Refinement_Tabesh(FaseBanco, AdjencyMatrix, Min_Cluster_Length = 10, Iterations_PostProcessing=5, Reset_Clusters_Index=False):
+    '''
+    Refina la forma de los clusters de la fase-banco, utilizando el criterio de Tabesh (2013).
+    Depende de la función Find_Corner_Blocks_Tabesh.
+    Devuelve el DataFrame de la fase-banco.
+    '''
+    
     fase_banco = FaseBanco.copy()
     execution_time = 0
     ID_Small_Clusters = fase_banco['cluster'].value_counts().loc[fase_banco['cluster'].value_counts() < Min_Cluster_Length].index.tolist()
@@ -423,7 +460,6 @@ def Shape_Refinement_Tabesh(FaseBanco, AdjencyMatrix, Min_Cluster_Length = 10, I
 
     for iterations in range(Iterations_PostProcessing):
         Corner_Blocks = Find_Corner_Blocks_Tabesh(fase_banco, AdjencyMatrix)
-        
         if len(Corner_Blocks) == 0:
             break
         for i in Corner_Blocks.keys():
@@ -445,6 +481,13 @@ def Shape_Refinement_Tabesh(FaseBanco, AdjencyMatrix, Min_Cluster_Length = 10, I
     return fase_banco, execution_time, N_Clusters
 
 def Shape_Refinement_Mod(FaseBanco, AdjencyMatrix, Min_Cluster_Length = 10, Iterations_PostProcessing=5, Reset_Clusters_Index=False):
+    '''
+    Modificación del refinamiento de formas. Además de considerar los corners según Tabesh (2013),
+    también considera los bloques que tienen 3 vecinos de distintos clusters o sólo 1 vecino de otro cluster.
+    A diferencia del refinamiento de Tabesh, el cual trabaja por etapas, este refinamiento se realiza de forma
+    secuencial.
+    '''
+
     fase_banco = FaseBanco.copy()
     execution_time = 0
     ID_Small_Clusters = fase_banco['cluster'].value_counts().loc[fase_banco['cluster'].value_counts() < Min_Cluster_Length].index.tolist()
@@ -476,12 +519,14 @@ def Shape_Refinement_Mod(FaseBanco, AdjencyMatrix, Min_Cluster_Length = 10, Iter
                         Clusters_Vecinos.append(fase_banco.iloc[cols[j]]['cluster'].astype(int))
 
                 if Mismo_Cluster <=1:
+                    # Criterio Tabesh
                     if (Distinto_Cluster >= 2) and len(np.unique(Clusters_Vecinos)) < len(Clusters_Vecinos):
                         Cluster_to_insert = np.unique_counts(Clusters_Vecinos).values[np.unique_counts(Clusters_Vecinos).counts.argmax()]
                         fase_banco.loc[b, 'cluster'] = Cluster_to_insert
                         # corner_blocks.append(b)
                         # print(f'Caso 1: {cluster}, {b}, {Clusters_Vecinos}')
 
+                    # Criterio Modificado. Considera los casos en que el bloque tiene 3 vecinos de distintos clusters o sólo 1 vecino de otro cluster.
                     elif ((Distinto_Cluster == 3) and (len(np.unique(Clusters_Vecinos)) == len(Clusters_Vecinos))) or ((Distinto_Cluster == 1)):
                         choose = 0
                         Cluster_to_insert = fase_banco.iloc[b]['cluster']
@@ -513,6 +558,9 @@ def Shape_Refinement_Mod(FaseBanco, AdjencyMatrix, Min_Cluster_Length = 10, Iter
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 def Clusters_Vecinos(FaseBanco, Cluster, AdjencyMatrix):
+    '''
+    Calcula los clusters vecinos al cluster especificado.
+    '''
     Blocks = FaseBanco.loc[FaseBanco['cluster'] == Cluster].index
     rows, cols = AdjencyMatrix.nonzero()
     Clusters_Vecinos = []
@@ -523,90 +571,61 @@ def Clusters_Vecinos(FaseBanco, Cluster, AdjencyMatrix):
                     Clusters_Vecinos.append(FaseBanco.iloc[cols[j]]['cluster'].astype(int))
     return Clusters_Vecinos
 
-def Precedencias_Clusters_Angle(FaseBanco, P_inicio, P_final, BlockWidth, BlockHeight):
+def Precedencias_Clusters_Agend(FaseBanco, P_inicio, P_final, BlockWidth, BlockHeight, Distance_Option=False):
+    '''
+    Calcula las precedencias de los clusters. Actualiza el dataframe FaseBanco con el nuevo orden entre clusters y también devuelve
+    un diccionario con las precedencias junto con los centros de los clusters.
+    Depende de Calculate_Adjency_Matrix.
+    '''
     fase_banco = FaseBanco.copy()
     ID_Clusters = fase_banco['cluster'].unique()
     Num_Clusters = len(ID_Clusters)
     Centers = {}
     t1 = time.time()
+    # Calculo de centros de los clusters
     for id in ID_Clusters:
         Cluster = fase_banco.loc[fase_banco['cluster']==id]
         P_center = (Cluster['x'].mean(), Cluster['y'].mean())
         Centers[id] = P_center
     
     distancias_al_inicio = {}
-    Clusters_Ordenados = {}
+    Dic_Precedencias = {}
     adjency_matrix = Calculate_Adjency_Matrix(fase_banco, BlockWidth, BlockHeight)
 
+    # Calculo de las distancias de los clusters al punto de inicio
+    # Distance_Option = True, calcula la distancia proyectando a la recta de dirección de minería
+    # Distance_Option = False, calcula la distancia euclideana al punto de inicio.
     for id in Centers.keys():
-        d = np.sqrt( (Centers[id][0] - P_inicio[0])**2 + (Centers[id][1] - P_inicio[1])**2 )
-        distancias_al_inicio[id] = d
+        if Distance_Option:
+            di = np.sqrt( (P_inicio[0] - Centers[id][0])**2 + (P_inicio[1] - Centers[id][1])**2 )
+            df = np.sqrt( (P_final[0] - Centers[id][0])**2 + (P_final[1] - Centers[id][1])**2 )
+            L = np.sqrt( (P_inicio[0] - P_final[0])**2 + (P_inicio[1] - P_final[1])**2 )
+            d = (di**2 + L**2 - df**2)/(2*L)
+            distancias_al_inicio[id] = d
+        else:
+            d = np.sqrt( (Centers[id][0] - P_inicio[0])**2 + (Centers[id][1] - P_inicio[1])**2 )
+            distancias_al_inicio[id] = d
         
     distancias_al_inicio = sorted(distancias_al_inicio.items(), key=lambda item: item[1])
     distancias_al_inicio = dict(distancias_al_inicio)
-    Clusters_Ordenados[list(distancias_al_inicio.keys())[0]] = np.array([], dtype=int)
+    # El primer cluster escogido es el de menor distancia
+    Dic_Precedencias[list(distancias_al_inicio.keys())[0]] = []
     Clusters_Candidatos = set()
-    vector_dir_min = ( P_final[0]-P_inicio[0], P_final[1]-P_inicio[1] )
 
+    # En cada iteración, calcula Clusters_Candidatos, que son los clusters vecinos a los clusters ya "minados" (ordenados).
+    # Luego, de entre los candidatos, escoge el que tiene menor distancia y lo añade a los clusters ordenados.
+    # Después calcula las precedencias del nuevo cluster, los cuales son los clusters vecinos que ya fuerons "minados".
     for iterations in range(Num_Clusters-1):
-        prev_cluster = list(Clusters_Ordenados.keys())[iterations]
+        prev_cluster = list(Dic_Precedencias.keys())[iterations]
         Clusters_Vecinos_prev_cluster = Clusters_Vecinos(fase_banco, prev_cluster, adjency_matrix)
 
         Clusters_Candidatos.update(Clusters_Vecinos_prev_cluster)
-        for c in Clusters_Ordenados.keys():
-            Clusters_Candidatos.discard(c)
-
-        sub_distancias = {k: distancias_al_inicio[k] for k in Clusters_Candidatos}
-        next_cluster = min(sub_distancias, key=sub_distancias.get)
-        Precedencias = []
-
-        Clusters_Vecinos_next_cluster = Clusters_Vecinos(fase_banco, next_cluster, adjency_matrix)
-        for cluster in Clusters_Ordenados.keys():
-            v1 = ( Centers[cluster][0]-Centers[next_cluster][0], Centers[cluster][1]-Centers[next_cluster][1] )
-            product = vector_dir_min[0]*v1[0] + vector_dir_min[1]*v1[1]
-            if product < 0 and (cluster in Clusters_Vecinos_next_cluster):
-                Precedencias.append(cluster)
-        Clusters_Ordenados[next_cluster] = np.array(Precedencias, dtype=int)
-    t2 = time.time()
-    execution_time= t2-t1
-    return Clusters_Ordenados, Centers, execution_time
-
-def Precedencias_Clusters_Agend(FaseBanco, P_inicio, P_final, BlockWidth, BlockHeight):
-    fase_banco = FaseBanco.copy()
-    ID_Clusters = fase_banco['cluster'].unique()
-    Num_Clusters = len(ID_Clusters)
-    Centers = {}
-    t1 = time.time()
-    for id in ID_Clusters:
-        Cluster = fase_banco.loc[fase_banco['cluster']==id]
-        P_center = (Cluster['x'].mean(), Cluster['y'].mean())
-        Centers[id] = P_center
-    
-    distancias_al_inicio = {}
-    Clusters_Ordenados = {}
-    adjency_matrix = Calculate_Adjency_Matrix(fase_banco, BlockWidth, BlockHeight)
-
-    for id in Centers.keys():
-        d = np.sqrt( (Centers[id][0] - P_inicio[0])**2 + (Centers[id][1] - P_inicio[1])**2 )
-        distancias_al_inicio[id] = d
-        
-    distancias_al_inicio = sorted(distancias_al_inicio.items(), key=lambda item: item[1])
-    distancias_al_inicio = dict(distancias_al_inicio)
-    # Clusters_Ordenados[list(distancias_al_inicio.keys())[0]] = np.array([], dtype=int)
-    Clusters_Ordenados[list(distancias_al_inicio.keys())[0]] = []
-    Clusters_Candidatos = set()
-
-    for iterations in range(Num_Clusters-1):
-        prev_cluster = list(Clusters_Ordenados.keys())[iterations]
-        Clusters_Vecinos_prev_cluster = Clusters_Vecinos(fase_banco, prev_cluster, adjency_matrix)
-
-        Clusters_Candidatos.update(Clusters_Vecinos_prev_cluster)
-        for c in Clusters_Ordenados.keys():
+        for c in Dic_Precedencias.keys():
             Clusters_Candidatos.discard(c)
 
         sub_distancias = {k: distancias_al_inicio[k] for k in Clusters_Candidatos}
         if not sub_distancias:
-            resto = set(ID_Clusters).difference(set(Clusters_Ordenados.keys()))
+            resto = set(ID_Clusters).difference(set(Dic_Precedencias.keys()))
             sub_distancias = {k: distancias_al_inicio[k] for k in resto}
             next_cluster = min(sub_distancias, key=sub_distancias.get)
         else:
@@ -614,14 +633,32 @@ def Precedencias_Clusters_Agend(FaseBanco, P_inicio, P_final, BlockWidth, BlockH
         Precedencias = []
 
         Clusters_Vecinos_next_cluster = Clusters_Vecinos(fase_banco, next_cluster, adjency_matrix)
-        for cluster in Clusters_Ordenados.keys():
-            if (cluster in list(Clusters_Ordenados.keys())) and (cluster in Clusters_Vecinos_next_cluster):
+        for cluster in Dic_Precedencias.keys():
+            if (cluster in list(Dic_Precedencias.keys())) and (cluster in Clusters_Vecinos_next_cluster):
                 Precedencias.append(cluster)
-        # Clusters_Ordenados[next_cluster] = np.array(Precedencias, dtype=int)
-        Clusters_Ordenados[next_cluster] = Precedencias
+        Dic_Precedencias[next_cluster] = Precedencias
+    
+    # Finalmente, luego de ordenar y calcular las precedencias, reasigna la etiqueta de cada cluster de acuerdo al orden obtenido,
+    # tanto en el dataframe de la fase banco como en el diccionario de precedencias.
+    ord_cluster = np.array(list(Dic_Precedencias.keys()))
+    Precedencias_Clusters = {}
+    New_centers = {}
+    contador = 1
+    for key in Dic_Precedencias.keys():
+        new_value = []
+        for value in Dic_Precedencias[key]:
+            new_value.append(np.where(ord_cluster==value)[0][0]+1)
+
+        Precedencias_Clusters[contador] = new_value
+        New_centers[contador] = Centers[key]
+
+        contador += 1
+    
+    fase_banco['cluster'] = fase_banco['cluster'].apply(lambda x: np.where(ord_cluster==x)[0][0]+1)
     t2 = time.time()
     execution_time = t2-t1
-    return Clusters_Ordenados, Centers, execution_time
+
+    return Precedencias_Clusters, fase_banco, New_centers, execution_time
 
 
 
@@ -630,6 +667,10 @@ def Precedencias_Clusters_Agend(FaseBanco, P_inicio, P_final, BlockWidth, BlockH
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 def Rock_Unity(FaseBanco):
+    '''
+    Calcula la homogeneidad del tipo de roca de los clusters de la fase-banco.
+    Devuelve el promedio del Rock Unity y la distribución del Rock Unity por cluster.
+    '''
     if 'tipomineral' in FaseBanco.columns:
         ID_Clusters = np.sort(FaseBanco['cluster'].unique())
         num_clusters = len(ID_Clusters)
@@ -645,10 +686,14 @@ def Rock_Unity(FaseBanco):
         RU = sum_rock_unity/num_clusters
     else:
         RU = 1
-        RU_distribution = 1
+        RU_distribution = [1]
     return RU, RU_distribution
 
 def Destination_Dilution_Factor(FaseBanco):
+    '''
+    Calcula la homogeneidad del destino de los clusters de la fase-banco, pesado por el tonelaje de cada bloque.
+    Devuelve el promedio del DDF y la distribución del DDF por cluster.
+    '''
     ID_Clusters = np.sort(FaseBanco['cluster'].unique())
     num_clusters = len(ID_Clusters)
     sum_ddf = 0
@@ -665,6 +710,10 @@ def Destination_Dilution_Factor(FaseBanco):
     return DDF, DDF_distribution
 
 def Coefficient_Variation(FaseBanco):
+    '''
+    Calcula la variación porcentual en torno a la media en la ley de los bloques de cada cluster de la fase-banco.
+    Devuelve el promedio del CV de los clusters y la distribución del CV por cluster.
+    '''
     ID_Clusters = np.sort(FaseBanco['cluster'].unique())
     num_clusters = len(ID_Clusters)
     sum_cv = 0
