@@ -216,9 +216,24 @@ def plot_mine_blocks_adv(df,
     else:
         plt.show()
 
-#############################################################
-#############       Clustering Jerarquico       #############
-#############################################################
+
+def Calculate_Adjency_Matrix(FaseBanco, BlockWidth, BlockHeight):
+    '''
+    Crea la matriz de adyacencia de los bloques de la fase-banco respecto a sus coordenadas x e y.
+    Devuelve una matriz sparse (CSR).
+    '''
+    x = FaseBanco['x'].values
+    y = FaseBanco['y'].values
+
+    X1 = matlib.repmat(x.reshape(len(x),1), 1, len(x))
+    X2 = X1.T
+    Y1 = matlib.repmat(y.reshape(len(y),1), 1, len(y))
+    Y2 = Y1.T
+
+    D = np.sqrt((1/BlockWidth**2)*(X1 - X2)**2 + (1/BlockHeight**2)*(Y1 - Y2)**2)
+
+    adjency_matrix = (D <= 1) & (D > 0)
+    return adjency_matrix.astype(int)
 
 
 # --- Función de Adyacencia (sin cambios) ---
@@ -641,7 +656,7 @@ def cluster_mina_por_fase_banco(
 
                 if is_first_bench:
                     print(f"   Banco {current_banco_level}: Calculando similitud estándar.")
-                    S_current = calcular_matriz_similitud_completa(df_current_processed, wd=wd, wg=wg, r=r) # Usa la versión original sin penalización
+                    S_current = Calculate_Similarity_Matrix(df_current_processed, wd=wd, wg=wg, r=r) # Usa la versión original sin penalización
                 else:
                     print(f"   Banco {current_banco_level}: Calculando similitud con penalización c={penalty_factor_c}.")
                     # Encontrar mapeo de bloques inferiores (¡IMPLEMENTACIÓN CRÍTICA!)
@@ -829,49 +844,11 @@ def plot_phase_clusters_3d_interactive_bancos(df_clustered, phase_to_plot,
     # 7. Mostrar gráfico
     fig.show()
 
-def Calculate_Arcs(df_sup, df_inf, BlockWidth=10, arcs=defaultdict(list)):
+def Calculate_Arcs(df_sup, df_inf, BlockWidth=10, BlockHeight=10, arcs=defaultdict(list)):
     '''
     Asume que el df_inf corresponde a la fase banco inferior a df_sup, calcula los arcos de precedencia verticales
     '''
-    x1 = df_sup['x'].values
-    y1 = df_sup['y'].values
-    x2 = df_inf['x'].values
-    y2 = df_inf['y'].values
-
-    X1 = matlib.repmat(x1.reshape(len(x1), 1), 1, len(x2))  # (n_sup, n_inf)
-    X2 = matlib.repmat(x2.reshape(1, len(x2)), len(x1), 1)  # (n_sup, n_inf)
-
-    Y1 = matlib.repmat(y1.reshape(len(y1), 1), 1, len(y2))  # (n_sup, n_inf)
-    Y2 = matlib.repmat(y2.reshape(1, len(y2)), len(y1), 1)  # (n_sup, n_inf)
-
-    D = np.sqrt((X1 - X2)**2 + (Y1 - Y2)**2)
-
-    adjency_matrix = (D <= BlockWidth) & (D > 0)
-    adjency_matrix = sp.sparse.csr_matrix(adjency_matrix).astype(int)
-
-        # Obtener clusters únicos y sus índices
-    clusters_sup = df_sup['cluster'].unique()
-    clusters_inf = df_inf['cluster'].unique()
-
-    cluster_sup_to_idx = {c: i for i, c in enumerate(clusters_sup)}
-    cluster_inf_to_idx = {c: i for i, c in enumerate(clusters_inf)}
-
-    n_sup = len(clusters_sup)
-    n_inf = len(clusters_inf)
-
-    # Inicializar matriz de adyacencia entre clusters
-    A_clusters = np.zeros((n_sup, n_inf), dtype=int)
-
-    # Recorrer los pares adyacentes entre bloques
-    rows, cols = adjency_matrix.nonzero()  # A_block: sup x inf
-    for i_sup, i_inf in zip(rows, cols):
-        c_sup = df_sup.iloc[i_sup]['cluster']
-        c_inf = df_inf.iloc[i_inf]['cluster']
-
-        idx_sup = cluster_sup_to_idx[c_sup]
-        idx_inf = cluster_inf_to_idx[c_inf]
-
-        A_clusters[idx_sup, idx_inf] = 1
+    A_clusters = Calculate_Vertical_Adyacency_Matrix(df_sup, df_inf, BlockWidth=BlockWidth, BlockHeight=BlockHeight)
     f_inf = df_inf['fase'][0]
     b_inf = df_inf['banco'][0]
     f_sup = df_sup['fase'][0]
@@ -959,7 +936,7 @@ def Coefficient_Variation(FaseBanco, col='cut'):
 
 
 
-def Calculate_Vertical_Adyacency_Matrix(df_sup, df_inf, BlockWidth=10, arcs=defaultdict(list), cluster_col='cluster'):
+def Calculate_Vertical_Adyacency_Matrix(df_sup, df_inf, BlockWidth=10, BlockHeight=10, arcs=defaultdict(list), cluster_col='cluster'):
     '''
     Asume que el df_inf corresponde a la fase banco inferior a df_sup, calcula los arcos de precedencia verticales
     '''
@@ -974,9 +951,11 @@ def Calculate_Vertical_Adyacency_Matrix(df_sup, df_inf, BlockWidth=10, arcs=defa
     Y1 = matlib.repmat(y1.reshape(len(y1), 1), 1, len(y2))  # (n_sup, n_inf)
     Y2 = matlib.repmat(y2.reshape(1, len(y2)), len(y1), 1)  # (n_sup, n_inf)
 
-    D = np.sqrt((X1 - X2)**2 + (Y1 - Y2)**2)
 
-    adjency_matrix = (D <= BlockWidth) & (D > 0)
+    D = np.sqrt((1/BlockWidth**2)*(X1 - X2)**2 + (1/BlockHeight**2)*(Y1 - Y2)**2)
+    adjency_matrix = (D <= 1) & (D > 0)
+
+    # adjency_matrix = (D <= BlockWidth) & (D > 0)
     adjency_matrix = sp.sparse.csr_matrix(adjency_matrix).astype(int)
 
     # Obtener clusters únicos y sus índices
