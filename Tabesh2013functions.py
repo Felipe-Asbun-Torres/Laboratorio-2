@@ -7,9 +7,381 @@ import matplotlib.patches as patches
 import matplotlib.colors as mcolors 
 import time
 
+import plotly.graph_objects as go
+
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Plotting %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%}
+
+
+
+
+def plot_fase_3D(fase, width=900, height=800, column_hue='cluster', z_ratio=1):
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter3d(
+        x=fase['x'],
+        y=fase['y'],
+        z=fase['z'],
+        mode='markers',
+        marker=dict(
+            size=5,  # tamaño del punto
+            color=fase[column_hue],  # color según columna 'cut'
+            colorscale='rainbow',
+            colorbar=dict(title=column_hue),
+            opacity=0.8
+        ),
+        hovertemplate=(
+            "ID: %{customdata[0]}<br>" +
+            f"{column_hue}:"+"%{marker.color:.3f}<br>"
+        ),
+        customdata=fase[['id', column_hue]],
+        name='Bloques'
+    ))
+
+    fig.update_layout(
+        scene=dict(
+            xaxis_title='X',
+            yaxis_title='Y',
+            zaxis_title='Z',
+            aspectmode='data'
+        ),
+        title=f'Puntos 3D con Color según {column_hue}',
+        width=width,
+        height=height
+    )
+
+    fig.show()
+
+
+def plot_2_fase_banco_3D(fases_bancos, column_hue='cluster', precedence_option=True, arcs={}, width=1000, height=800, z_ratio=1):
+    fase_banco_lower, fase_banco_upper = fases_bancos
+    banco_lower = fase_banco_lower['banco'].values[0]
+    banco_upper = fase_banco_upper['banco'].values[0]
+
+    fase = fase_banco_lower['fase'].values[0]
+
+    if precedence_option:
+        if not arcs:
+            raise Exception('Debe adjuntar arcos si precedence_option=True')
+
+        arcs_lower = [k for k in arcs.keys() if k[0] == fase and k[1] == banco_lower]
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter3d(
+            x=fase_banco_lower['x'],
+            y=fase_banco_lower['y'],
+            z=fase_banco_lower['z'],
+            mode='markers',
+            marker=dict(
+                size=5,
+                color=fase_banco_lower[column_hue],
+                colorscale='rainbow',
+                cmin=fase_banco_lower[column_hue].min(),
+                cmax=fase_banco_lower[column_hue].max(),
+                opacity=0.9
+            ),
+            name='Capa inferior',
+            hoverinfo='skip'
+        ))
+        fig.add_trace(go.Scatter3d(
+            x=fase_banco_upper['x'],
+            y=fase_banco_upper['y'],
+            z=fase_banco_upper['z'],
+            mode='markers',
+            marker=dict(
+                size=5,
+                color=fase_banco_upper[column_hue],
+                colorscale='twilight',
+                cmin=fase_banco_upper[column_hue].min(),
+                cmax=fase_banco_upper[column_hue].max(),
+                opacity=0.9
+            ),
+            name='Capa superior',
+            hoverinfo='skip'
+        ))
+
+        buttons = []
+        trace_index = 2
+        Centros_lower = Centros_Clusters(fase_banco_lower)
+        Centros_upper = Centros_Clusters(fase_banco_upper)
+        z_lower = fase_banco_lower['z'].values[0]
+        z_upper = fase_banco_upper['z'].values[0]
+
+        for i, (cluster_id, (x,y)) in enumerate(Centros_lower.items()):
+            fig.add_trace(go.Scatter3d(
+                x=[x], y=[y], z=[z_lower],
+                mode='markers',
+                marker=dict(
+                    size=10,
+                    color='black'
+                ),
+                customdata=[[cluster_id, z_lower]],
+                hovertemplate='Cluster: %{customdata[0]}<br>Z: %{customdata[1]}<extra></extra>'
+            ))
+            trace_index+=1
+
+        for i, (cluster_id, (x,y)) in enumerate(Centros_upper.items()):
+            fig.add_trace(go.Scatter3d(
+                x=[x], y=[y], z=[z_upper],
+                mode='markers',
+                marker=dict(
+                    size=10,
+                    color='black'
+                ),
+                customdata=[[cluster_id, z_upper]],
+                hovertemplate='Cluster: %{customdata[0]}<br>Z: %{customdata[1]}<extra></extra>'
+            ))
+            trace_index+=1
+        
+        arrow_traces = []
+
+        for cluster in arcs_lower:
+            source_id = cluster[2]
+            for c in arcs[cluster]:
+                destiny_id = c[2]
+                fig.add_trace(go.Scatter3d(
+                    x=[Centros_lower[source_id][0], Centros_upper[destiny_id][0]],
+                    y=[Centros_lower[source_id][1], Centros_upper[destiny_id][1]],
+                    z=[z_lower, z_upper],
+                    mode='lines',
+                    line=dict(color='black', width=4),
+                    showlegend=False,
+                    hoverinfo='skip',
+                    visible=True
+                ))
+                trace_index+=1
+
+                fig.add_trace(go.Scatter3d(
+                    x=[Centros_upper[destiny_id][0]],
+                    y=[Centros_upper[destiny_id][1]],
+                    z=[z_upper],
+                    mode='markers',
+                    marker=dict(size=4, color='red'),
+                    showlegend=False,
+                    hoverinfo='skip',
+                    visible=True
+                ))
+                trace_index +=1
+                arrow_traces.append((source_id, trace_index-2, trace_index-1))
+        
+        all_visible = [True]*trace_index
+        buttons.append(dict(
+            label='Mostrar todos',
+            method='update',
+            args=[{'visible': all_visible}]
+        ))
+
+        unique_sources = sorted(set([sid for sid, _, _ in arrow_traces]))
+        for sid in unique_sources:
+            visibles = [True] * 2
+            visibles += [True] * len(Centros_lower)
+            visibles += [True] * len(Centros_upper)
+            for s, line_idx, point_idx in arrow_traces:
+                if s == sid:
+                    visibles += [True, True]
+                else:
+                    visibles += [False, False]
+            
+            buttons.append(dict(
+                label=f'Centro {sid}',
+                method='update',
+                args=[{'visible': visibles}]
+            ))
+        
+        fig.update_layout(
+            updatemenus=[dict(
+                buttons=buttons,
+                direction='down',
+                showactive=True,
+                x=1.1,
+                y=0.8
+            )]
+        )
+    
+    else:
+        fig = go.Figure()
+
+        fig.add_trace(go.Scatter3d(
+            x = fase_banco_lower['x'],
+            y = fase_banco_lower['y'],
+            z = fase_banco_lower['z'],
+            mode='markers',
+            marker=dict(
+                size=5,
+                color=fase_banco_lower[column_hue],
+                colorscale='rainbow',
+                cmin=fase_banco_lower[column_hue].min(),
+                cmax=fase_banco_lower[column_hue].max(),
+                opacity=0.9
+            ),
+            name='Capa inferior',
+            hovertemplate='Z: %{z}<br>'+f'{column_hue}:'+'%{marker.color:.3f}<extra></extra>'
+        ))
+
+        fig.add_trace(go.Scatter3d(
+            x = fase_banco_upper['x'],
+            y = fase_banco_upper['y'],
+            z = fase_banco_upper['z'],
+            mode='markers',
+            marker=dict(
+                size=5,
+                color=fase_banco_upper[column_hue],
+                colorscale='twilight',
+                cmin=fase_banco_upper[column_hue].min(),
+                cmax=fase_banco_upper[column_hue].max(),
+                opacity=0.9
+            ),
+            name='Capa superior',
+            hovertemplate='Z: %{z}<br>'+f'{column_hue}:'+'%{marker.color:.3f}<extra></extra>'
+        ))
+
+    x_all = pd.concat([fase_banco_lower['x'], fase_banco_upper['x']])
+    y_all = pd.concat([fase_banco_lower['y'], fase_banco_upper['y']])
+    z_all = pd.concat([fase_banco_lower['z'], fase_banco_upper['z']])
+
+    xrange = x_all.max() - x_all.min()
+    yrange = y_all.max() - y_all.min()
+    zrange = z_all.max() - z_all.min()
+    max_range = max(xrange, yrange, zrange)
+
+    aspectratio = dict(
+        x=xrange / max_range,
+        y=yrange / max_range,
+        z=(zrange / max_range)*z_ratio
+    )
+    fig.update_layout(
+        scene=dict(
+            xaxis_title='X',
+            yaxis_title='Y',
+            zaxis_title='Z',
+            aspectmode='manual',
+            aspectratio=aspectratio
+        ),
+        title=f'Fases bancos up:{banco_upper} - down:{banco_lower}',
+        width=width,
+        height=height
+    )
+    fig.show()
+
+# def plot_2_fase_banco(fases_bancos, column_hue='cluster', precedence_option=True, arcs={}):
+#     fase_banco_lower, fase_banco_upper = fases_bancos
+
+#     banco_lower = fase_banco_lower['banco'].values[0]
+#     banco_upper = fase_banco_upper['banco'].values[0]
+#     fig = go.Figure()
+
+#     fig.add_trace(go.Scatter3d(
+#         x = fase_banco_lower['x'],
+#         y = fase_banco_lower['y'],
+#         z = fase_banco_lower['z'],
+#         mode='markers',
+#         marker=dict(
+#             size=5,
+#             color=fase_banco_lower[column_hue],
+#             colorscale='rainbow',
+#             cmin=fase_banco_lower[column_hue].min(),
+#             cmax=fase_banco_lower[column_hue].max(),
+#             opacity=0.9
+#         ),
+#         name='Capa inferior',
+#         # hovertemplate='Z: %{z}<br>'+f'{column_hue}:'+'%{marker.color:.3f}<extra></extra>'
+#         hoverinfo='skip'
+#     ))
+
+#     fig.add_trace(go.Scatter3d(
+#         x = fase_banco_upper['x'],
+#         y = fase_banco_upper['y'],
+#         z = fase_banco_upper['z'],
+#         mode='markers',
+#         marker=dict(
+#             size=5,
+#             color=fase_banco_upper[column_hue],
+#             colorscale='twilight',
+#             cmin=fase_banco_upper[column_hue].min(),
+#             cmax=fase_banco_upper[column_hue].max(),
+#             opacity=0.9
+#         ),
+#         name='Capa superior',
+#         # hovertemplate='Z: %{z}<br>'+f'{column_hue}:'+'%{marker.color:.3f}<extra></extra>'
+#         hoverinfo='skip'
+#     ))
+
+#     if precedence_option:
+#         Centros_lower = Centros_Clusters(fase_banco_lower)
+#         Centros_upper = Centros_Clusters(fase_banco_upper)
+
+#         z_lower = fase_banco_lower['z'].values[0]
+#         z_upper = fase_banco_upper['z'].values[0]
+
+#         fig.add_trace(go.Scatter3d(
+#             x = np.array([P[0] for P in list(Centros_lower.values())]),
+#             y = np.array([P[1] for P in list(Centros_lower.values())]),
+#             z = np.ones(len(Centros_lower))*z_lower,
+#             mode='markers',
+#             marker=dict(
+#                 size=10,
+#                 color='black',
+#                 opacity=1
+#             ),
+#             name='Centros capa inferior',
+#             customdata=np.array([[cid, z_lower] for cid in list(Centros_lower.keys())]),
+#             hovertemplate='Cluster ID: %{customdata[0]}<br>Z: %{customdata[1]}<extra></extra>'
+#         ))
+
+#         fig.add_trace(go.Scatter3d(
+#             x = np.array([P[0] for P in list(Centros_upper.values())]),
+#             y = np.array([P[1] for P in list(Centros_upper.values())]),
+#             z = np.ones(len(Centros_upper))*z_upper,
+#             mode='markers',
+#             marker=dict(
+#                 size=10,
+#                 color='black',
+#                 opacity=1
+#             ),
+#             name='Centros capa superior',
+#             customdata=np.array([[cid, z_upper] for cid in list(Centros_upper.keys())]),
+#             hovertemplate='Cluster ID: %{customdata[0]}<br>Z: %{customdata[1]}<extra></extra>'
+#         ))
+
+#         fase = fase_banco_lower['fase'].values[0]
+#         banco_lower = fase_banco_lower['banco'].values[0]
+#         arcs_lower = [k for k in arcs.keys() if k[0]==fase and k[1]==banco_lower]
+#         for cluster in arcs_lower:
+#             clusters_precedentes = arcs[cluster]
+#             for c in clusters_precedentes:
+#                 fig.add_trace(go.Scatter3d(
+#                     x=[Centros_lower[cluster[2]][0], Centros_upper[c[2]][0]],
+#                     y=[Centros_lower[cluster[2]][1], Centros_upper[c[2]][1]],
+#                     z=[z_lower, z_upper],
+#                     mode='lines',
+#                     line=dict(color='black', width=4),
+#                     showlegend=False,
+#                     hoverinfo='skip'
+#                 ))
+#                 fig.add_trace(go.Scatter3d(
+#                     x=[Centros_upper[c[2]][0]],
+#                     y=[Centros_upper[c[2]][1]],
+#                     z=[z_upper],
+#                     mode="markers",
+#                     marker=dict(size=4, color="red"),
+#                     showlegend=False,
+#                     hoverinfo='skip'
+#                 ))
+
+
+#     fig.update_layout(
+#         scene=dict(
+#             xaxis_title='X',
+#             yaxis_title='Y',
+#             zaxis_title='Z',
+#             aspectmode='data'
+#         ),
+#         title=f'Fases bancos {banco_lower}-{banco_upper}',
+#         width=1000,
+#         height=800
+#     )
+#     fig.show()
 
 # Función para graficar fases-bancos en 2D.
 def plot_fase_banco(
@@ -584,6 +956,15 @@ def Clusters_Vecinos(FaseBanco, Cluster, AdjencyMatrix):
                     Clusters_Vecinos.append(FaseBanco.iloc[cols[j]]['cluster'].astype(int))
     return Clusters_Vecinos
 
+def Centros_Clusters(FaseBanco):
+    ID_Clusters = FaseBanco['cluster'].unique()
+    Centers = {}
+    for id in ID_Clusters:
+        Cluster = FaseBanco.loc[FaseBanco['cluster']==id]
+        P_center = (Cluster['x'].mean(), Cluster['y'].mean())
+        Centers[id] = P_center
+    return Centers
+
 def Precedencias_Clusters_Agend(FaseBanco, P_inicio, P_final, BlockWidth, BlockHeight, Distance_Option=True):
     '''
     Calcula las precedencias de los clusters. Actualiza el dataframe FaseBanco con el nuevo orden entre clusters y también devuelve
@@ -593,13 +974,14 @@ def Precedencias_Clusters_Agend(FaseBanco, P_inicio, P_final, BlockWidth, BlockH
     fase_banco = FaseBanco.copy()
     ID_Clusters = fase_banco['cluster'].unique()
     Num_Clusters = len(ID_Clusters)
-    Centers = {}
+    
     t1 = time.time()
-    # Calculo de centros de los clusters
-    for id in ID_Clusters:
-        Cluster = fase_banco.loc[fase_banco['cluster']==id]
-        P_center = (Cluster['x'].mean(), Cluster['y'].mean())
-        Centers[id] = P_center
+    Centers = Centros_Clusters(FaseBanco)
+    # # Calculo de centros de los clusters
+    # for id in ID_Clusters:
+    #     Cluster = fase_banco.loc[fase_banco['cluster']==id]
+    #     P_center = (Cluster['x'].mean(), Cluster['y'].mean())
+    #     Centers[id] = P_center
     
     distancias_al_inicio = {}
     Dic_Precedencias = {}
