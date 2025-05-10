@@ -12,6 +12,67 @@ import numpy.matlib as matlib
 import scipy as sp
 from collections import defaultdict
 
+def plot_cluster_precedence(
+    df1,
+    df2,
+    block_width=10,
+    block_height=10,
+    title='Bloques coloreados por clúster con contorno de df2',
+    show_grid=True,
+    figsize=(12, 10),
+    dpi=100,
+    outline_color='red'
+):
+    # Crear mapa de colores por clúster
+    unique_clusters = sorted(df1['cluster'].unique())
+    cmap = plt.cm.get_cmap('tab20', len(unique_clusters))
+    cluster_to_color = {cluster: cmap(i) for i, cluster in enumerate(unique_clusters)}
+
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+
+    # Dibujar bloques de df1 (rellenados por clúster)
+    for _, row in df1.iterrows():
+        x, y = row['x'], row['y']
+        cluster = row['cluster']
+        color = cluster_to_color[cluster]
+        rect = patches.Rectangle((x, y), block_width, block_height,
+                                 linewidth=0.5, edgecolor='black', facecolor=color)
+        ax.add_patch(rect)
+
+        # Número de clúster al centro
+        ax.text(x + block_width / 2, y + block_height / 2,
+                str(cluster), ha='center', va='center', fontsize=6, color='black')
+
+    # Dibujar contorno de bloques en df2
+    for _, row in df2.iterrows():
+        x, y = row['x'], row['y']
+        rect = patches.Rectangle((x, y), block_width, block_height,
+                                 linewidth=1.5, edgecolor=outline_color, facecolor='none')
+        ax.add_patch(rect)
+
+    # Opciones de presentación
+    ax.set_aspect('equal')
+    ax.set_title(title)
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+
+    # Límites automáticos
+    x_all = pd.concat([df1['x'], df2['x']])
+    y_all = pd.concat([df1['y'], df2['y']])
+    ax.set_xlim(x_all.min() - block_width, x_all.max() + block_width)
+    ax.set_ylim(y_all.min() - block_height, y_all.max() + block_height)
+
+    if show_grid:
+        for xg in sorted(df1['x'].unique()):
+            ax.axvline(xg, color='gray', linewidth=0.2, linestyle='--')
+        for yg in sorted(df1['y'].unique()):
+            ax.axhline(yg, color='gray', linewidth=0.2, linestyle='--')
+
+    plt.tight_layout()
+    plt.show()
+
+
+
 def plot_mine_blocks_adv(df,
                          color_by_col,
                          x_col='x',
@@ -154,13 +215,18 @@ def plot_mine_blocks_adv(df,
 
         # Añadir etiqueta de texto si se solicita
         if show_block_labels and not pd.isna(block_value):
-            # Formatear etiqueta para continuos si es numérico
-            label_text = f"{block_value:.1f}" if isinstance(block_value, (int, float)) else str(block_value)
+            # Si es numérico y entero, mostrar sin decimales
+            if isinstance(block_value, (int, float)) and block_value == int(block_value):
+                label_text = f"{int(block_value)}"
+            elif isinstance(block_value, (int, float)):
+                label_text = f"{block_value:.1f}"
+            else:
+                label_text = str(block_value)
+
             ax.text(x_center, y_center, label_text,
                     ha='center', va='center',
                     fontsize=fontsize_block_label,
-                    color='black' if np.mean(mcolors.to_rgb(color)) > 0.5 else 'white') # Texto blanco sobre oscuro, negro sobre claro
-
+                    color='black' if np.mean(mcolors.to_rgb(color)) > 0.5 else 'white')
     # --- Configuración de Ejes ---
     if xlim is None:
         x_min = df[x_col].min() - block_width
@@ -856,7 +922,7 @@ def Calculate_Arcs(df_sup, df_inf, BlockWidth=10, BlockHeight=10, arcs=defaultdi
     for i in range(A_clusters.shape[1]):  # i: índice de clusters inferiores
         for j in range(A_clusters.shape[0]):  # j: índice de clusters superiores
             if A_clusters.T[i][j] == 1:
-                arcs[(f_inf, b_inf, i + 1)].append((f_sup, b_sup, j + 1))
+                arcs[(int(f_inf), int(b_inf), i + 1)].append((int(f_sup), int(b_sup), j + 1))
 
     return arcs
 
@@ -866,7 +932,6 @@ def Precedencia_Fase_Banco(df):
 
     # Crear una nueva columna 'nivel' basada en la posición de 'z' en el array ordenado
     df['nivel'] = df['z'].apply(lambda x: np.where(sorted_unique_z == x)[0][0])
-
     info_fb = {}
     fases_a_procesar = np.sort(df['fase'].unique())
     for f in fases_a_procesar:
@@ -879,7 +944,7 @@ def Precedencia_Fase_Banco(df):
             max_x = df_inf['x'].max()
             min_y = df_inf['y'].min()
             max_y = df_inf['y'].max()
-            info_fb[(f,b)] = (z_level, min_x, max_x, min_y,max_y)
+            info_fb[(int(f),int(b))] = (z_level, min_x, max_x, min_y,max_y)
 
     # Lista para guardar los pares (f_i, b_i) y (f_j, b_j) que cumplen la condición
     resultados = []
@@ -887,7 +952,7 @@ def Precedencia_Fase_Banco(df):
     # Iterar sobre todos los pares (f1, b1) y (f2, b2)
     for (f1, b1), (z1, min_x1, max_x1, min_y1, max_y1) in info_fb.items():
         for (f2, b2), (z2, min_x2, max_x2, min_y2, max_y2) in info_fb.items():
-            # Condición 1: z1 == z2+1
+            # Condición 1: z1 == z2+1 (es necesario que )
             if z1 == z2+1:
                 # Condición 2: Los cuadros delimitados por (x, y) se intersectan
                 if (min_x1 <= max_x2 and max_x1 >= min_x2) and (min_y1 <= max_y2 and max_y1 >= min_y2):

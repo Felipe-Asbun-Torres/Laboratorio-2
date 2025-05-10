@@ -28,4 +28,5 @@ corner_alg.ipynb
 *.csv
 *.pdf
 *.sol
+*.Identifier
 
