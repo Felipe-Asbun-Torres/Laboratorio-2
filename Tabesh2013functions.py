@@ -16,7 +16,7 @@ import plotly.graph_objects as go
 
 
 
-def plot_fase_3D(fase, width=900, height=800, column_hue='cluster', z_ratio=1):
+def plot_fase_3D(fase, width=900, height=800, column_hue='cluster', elipses=[], cone=(), curve=[], opacity_blocks=1, z_ratio=1):
     fig = go.Figure()
 
     fig.add_trace(go.Scatter3d(
@@ -29,7 +29,7 @@ def plot_fase_3D(fase, width=900, height=800, column_hue='cluster', z_ratio=1):
             color=fase[column_hue],  # color según columna 'cut'
             colorscale='rainbow',
             colorbar=dict(title=column_hue),
-            opacity=0.8
+            opacity=opacity_blocks
         ),
         hovertemplate=(
             "ID: %{customdata[0]}<br>" +
@@ -39,12 +39,73 @@ def plot_fase_3D(fase, width=900, height=800, column_hue='cluster', z_ratio=1):
         name='Bloques'
     ))
 
+    Theta = np.linspace(0, 2*np.pi, 100)
+    for elipse in elipses:
+        if len(elipse) == 5:
+            a, b, x_centro, y_centro, z_centro = elipse
+            X_elipse = a*np.cos(Theta) + x_centro
+            Y_elipse = b*np.sin(Theta) + y_centro
+            Z_elipse = np.full_like(Theta, z_centro)
+
+            fig.add_trace(go.Scatter3d(
+                x = X_elipse, y = Y_elipse, z = Z_elipse,
+                mode='lines',
+                line=dict(color='black', width=2)
+            ))
+        if len(elipse) == 3:
+            X_elipse, Y_elipse, Z_elipse = elipse
+            fig.add_trace(go.Scatter3d(
+                x=X_elipse, y=Y_elipse, z=Z_elipse,
+                mode='lines',
+                line=dict(color='blue', width=2)
+            ))
+
+    if cone:
+        a, b, h, x_centro, y_centro, z_centro = cone
+        Z = np.linspace(z_centro - h, z_centro, 100)
+        Theta, Z = np.meshgrid(Theta, Z)
+        X_cono = (a/h)*(h-z_centro+Z)*np.cos(Theta) + x_centro
+        Y_cono = (b/h)*(h-z_centro+Z)*np.sin(Theta) + y_centro
+        
+        fig.add_trace(go.Surface(
+            x=X_cono,
+            y=Y_cono,
+            z=Z,
+            colorscale='viridis',
+            opacity=0.8,
+            showscale=False
+        ))
+    if curve:
+        X_curve, Y_curve, Z_curve = curve
+        fig.add_trace(go.Scatter3d(
+            x=X_curve, y=Y_curve, z=Z_curve,
+            mode='lines',
+            line=dict(color='black', width=5),
+            name='Rampa'
+        ))
+
+    x_all = fase['x']
+    y_all = fase['y']
+    z_all = fase['z']
+
+    xrange = x_all.max() - x_all.min()
+    yrange = y_all.max() - y_all.min()
+    zrange = z_all.max() - z_all.min()
+    max_range = max(xrange, yrange, zrange)
+
+    aspectratio = dict(
+        x=xrange / max_range,
+        y=yrange / max_range,
+        z=(zrange / max_range)*z_ratio
+    )
+
     fig.update_layout(
         scene=dict(
             xaxis_title='X',
             yaxis_title='Y',
             zaxis_title='Z',
-            aspectmode='data'
+            aspectmode='manual',
+            aspectratio=aspectratio
         ),
         title=f'Puntos 3D con Color según {column_hue}',
         width=width,
@@ -402,6 +463,7 @@ def plot_fase_banco(
         sectors=[],
         precedences={},
         centers={},
+        elipse=[],
         save_as_image=False,
         path_to_save=''
         ):
@@ -467,14 +529,14 @@ def plot_fase_banco(
     if is_continuous:
         x_min = FaseBanco['x'].min() - 5*block_width
         x_max = FaseBanco['x'].max() + 5*block_width
-        ax.set_xlim(x_min, x_max)
+        # ax.set_xlim(x_min, x_max)
     else:
         x_min = FaseBanco['x'].min() - 5*block_width
         x_max = FaseBanco['x'].max() + 5*block_width
-        ax.set_xlim(x_min, x_max)
+        # ax.set_xlim(x_min, x_max)
     y_min = FaseBanco['y'].min() - 5*block_height
     y_max = FaseBanco['y'].max() + 5*block_height
-    ax.set_ylim(y_min, y_max)
+    # ax.set_ylim(y_min, y_max)
 
     ax.set_aspect('equal', adjustable='box')
     ax.set_xlabel('X')
@@ -513,6 +575,14 @@ def plot_fase_banco(
         ax.annotate(str(sector_count), xy=center, color='black', fontsize=32)
         sector_count+=1
     
+    for params in elipse:
+        a, b, x_barra, y_barra = params
+        Theta = np.linspace(0, 2*np.pi, 100)
+        X_elipse = a*np.cos(Theta) + x_barra
+        Y_elipse = b*np.sin(Theta) + y_barra
+
+        ax.plot(X_elipse, Y_elipse, color='black')
+
     if is_continuous:
         sm = plt.cm.ScalarMappable(cmap=colormap, norm=norm)
         sm.set_array([])
@@ -1230,3 +1300,49 @@ def Coefficient_Variation(FaseBanco):
         CV_distribution.append(cv)
     CV = sum_cv/num_clusters
     return CV, CV_distribution
+
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Best Cone %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+def Best_Cone(fase):
+    x_c = fase['x'].mean()
+    y_c = fase['y'].mean()
+    z_c = fase['z'].max()
+    # fase = fase.copy()
+    # fase['z_c'] = np.ones(len(fase))*z_c
+    points = np.array(fase[['x', 'y', 'z']])
+
+    a_guess = fase['x'].max() - fase['x'].min()
+    b_guess = fase['y'].max() - fase['y'].min()
+    h_guess = fase['z'].max()
+
+    def objective(params):
+        a, b, h, x_cone, y_cone = params
+        varepsilon = 1e-2
+        if (a <= 0) or (b <= 0) or (h <= 0):
+            return np.inf
+        return (1/3)*np.pi*a*b*h + varepsilon*abs(x_cone-x_c)**2 + varepsilon*abs(y_cone-y_c)**2
+    
+    def constrainst_gen(point):
+        z_c = fase['z'].max()
+        def constraint(params):
+            a, b, h, x_cone, y_cone = params
+            A = (a/h)*(h-z_c+point[2])
+            B = (b/h)*(h-z_c+point[2])
+            if A < 0:
+                A = 1e-12
+            if B < 0:
+                B = 1e-12
+            M = np.array([[1/A**2, 0],
+                        [0, 1/B**2]])
+            return 1 - (point[0:2]-np.array((x_cone, y_cone))) @ M @ (point[0:2]-np.array((x_cone, y_cone)))
+        return constraint
+    
+    constraints = [{'type': 'ineq', 'fun': constrainst_gen(p)} for p in points]
+    
+    initial_guess = (a_guess, b_guess, h_guess, x_c, y_c)
+    result = sp.optimize.minimize(objective, initial_guess, constraints=constraints, method='SLSQP')
+
+    return result
