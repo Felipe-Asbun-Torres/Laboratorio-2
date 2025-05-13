@@ -16,7 +16,7 @@ import plotly.graph_objects as go
 
 
 
-def plot_fase_3D(fase, width=900, height=800, column_hue='cluster', elipses=[], cone=(), curve=[], opacity_blocks=1, z_ratio=1):
+def plot_fase_3D(fase, width=900, height=800, column_hue='cluster', elipses=[], cone=(), curve=[], opacity_blocks=1, z_ratio=1, points=[]):
     fig = go.Figure()
 
     fig.add_trace(go.Scatter3d(
@@ -75,6 +75,7 @@ def plot_fase_3D(fase, width=900, height=800, column_hue='cluster', elipses=[], 
             opacity=0.8,
             showscale=False
         ))
+
     if curve:
         X_curve, Y_curve, Z_curve = curve
         fig.add_trace(go.Scatter3d(
@@ -82,6 +83,17 @@ def plot_fase_3D(fase, width=900, height=800, column_hue='cluster', elipses=[], 
             mode='lines',
             line=dict(color='black', width=5),
             name='Rampa'
+        ))
+    
+    if points:
+        X = [p[0] for p in points]
+        Y = [p[1] for p in points]
+        Z = [p[2] for p in points]
+        fig.add_trace(go.Scatter3d(
+            x=X, y=Y, z=Z,
+            mode='markers',
+            marker=dict(color='red', size=10),
+            name='Puntos Iniciales'
         ))
 
     x_all = fase['x']
@@ -325,124 +337,6 @@ def plot_2_fase_banco_3D(fases_bancos, column_hue='cluster', precedence_option=T
     )
     fig.show()
 
-# def plot_2_fase_banco(fases_bancos, column_hue='cluster', precedence_option=True, arcs={}):
-#     fase_banco_lower, fase_banco_upper = fases_bancos
-
-#     banco_lower = fase_banco_lower['banco'].values[0]
-#     banco_upper = fase_banco_upper['banco'].values[0]
-#     fig = go.Figure()
-
-#     fig.add_trace(go.Scatter3d(
-#         x = fase_banco_lower['x'],
-#         y = fase_banco_lower['y'],
-#         z = fase_banco_lower['z'],
-#         mode='markers',
-#         marker=dict(
-#             size=5,
-#             color=fase_banco_lower[column_hue],
-#             colorscale='rainbow',
-#             cmin=fase_banco_lower[column_hue].min(),
-#             cmax=fase_banco_lower[column_hue].max(),
-#             opacity=0.9
-#         ),
-#         name='Capa inferior',
-#         # hovertemplate='Z: %{z}<br>'+f'{column_hue}:'+'%{marker.color:.3f}<extra></extra>'
-#         hoverinfo='skip'
-#     ))
-
-#     fig.add_trace(go.Scatter3d(
-#         x = fase_banco_upper['x'],
-#         y = fase_banco_upper['y'],
-#         z = fase_banco_upper['z'],
-#         mode='markers',
-#         marker=dict(
-#             size=5,
-#             color=fase_banco_upper[column_hue],
-#             colorscale='twilight',
-#             cmin=fase_banco_upper[column_hue].min(),
-#             cmax=fase_banco_upper[column_hue].max(),
-#             opacity=0.9
-#         ),
-#         name='Capa superior',
-#         # hovertemplate='Z: %{z}<br>'+f'{column_hue}:'+'%{marker.color:.3f}<extra></extra>'
-#         hoverinfo='skip'
-#     ))
-
-#     if precedence_option:
-#         Centros_lower = Centros_Clusters(fase_banco_lower)
-#         Centros_upper = Centros_Clusters(fase_banco_upper)
-
-#         z_lower = fase_banco_lower['z'].values[0]
-#         z_upper = fase_banco_upper['z'].values[0]
-
-#         fig.add_trace(go.Scatter3d(
-#             x = np.array([P[0] for P in list(Centros_lower.values())]),
-#             y = np.array([P[1] for P in list(Centros_lower.values())]),
-#             z = np.ones(len(Centros_lower))*z_lower,
-#             mode='markers',
-#             marker=dict(
-#                 size=10,
-#                 color='black',
-#                 opacity=1
-#             ),
-#             name='Centros capa inferior',
-#             customdata=np.array([[cid, z_lower] for cid in list(Centros_lower.keys())]),
-#             hovertemplate='Cluster ID: %{customdata[0]}<br>Z: %{customdata[1]}<extra></extra>'
-#         ))
-
-#         fig.add_trace(go.Scatter3d(
-#             x = np.array([P[0] for P in list(Centros_upper.values())]),
-#             y = np.array([P[1] for P in list(Centros_upper.values())]),
-#             z = np.ones(len(Centros_upper))*z_upper,
-#             mode='markers',
-#             marker=dict(
-#                 size=10,
-#                 color='black',
-#                 opacity=1
-#             ),
-#             name='Centros capa superior',
-#             customdata=np.array([[cid, z_upper] for cid in list(Centros_upper.keys())]),
-#             hovertemplate='Cluster ID: %{customdata[0]}<br>Z: %{customdata[1]}<extra></extra>'
-#         ))
-
-#         fase = fase_banco_lower['fase'].values[0]
-#         banco_lower = fase_banco_lower['banco'].values[0]
-#         arcs_lower = [k for k in arcs.keys() if k[0]==fase and k[1]==banco_lower]
-#         for cluster in arcs_lower:
-#             clusters_precedentes = arcs[cluster]
-#             for c in clusters_precedentes:
-#                 fig.add_trace(go.Scatter3d(
-#                     x=[Centros_lower[cluster[2]][0], Centros_upper[c[2]][0]],
-#                     y=[Centros_lower[cluster[2]][1], Centros_upper[c[2]][1]],
-#                     z=[z_lower, z_upper],
-#                     mode='lines',
-#                     line=dict(color='black', width=4),
-#                     showlegend=False,
-#                     hoverinfo='skip'
-#                 ))
-#                 fig.add_trace(go.Scatter3d(
-#                     x=[Centros_upper[c[2]][0]],
-#                     y=[Centros_upper[c[2]][1]],
-#                     z=[z_upper],
-#                     mode="markers",
-#                     marker=dict(size=4, color="red"),
-#                     showlegend=False,
-#                     hoverinfo='skip'
-#                 ))
-
-
-#     fig.update_layout(
-#         scene=dict(
-#             xaxis_title='X',
-#             yaxis_title='Y',
-#             zaxis_title='Z',
-#             aspectmode='data'
-#         ),
-#         title=f'Fases bancos {banco_lower}-{banco_upper}',
-#         width=1000,
-#         height=800
-#     )
-#     fig.show()
 
 # Función para graficar fases-bancos en 2D.
 def plot_fase_banco(
@@ -1088,6 +982,18 @@ def Precedencias_Clusters_Agend(FaseBanco, P_inicio, P_final, BlockWidth, BlockH
         Clusters_Candidatos.update(Clusters_Vecinos_prev_cluster)
         for c in Dic_Precedencias.keys():
             Clusters_Candidatos.discard(c)
+        
+        # if not Clusters_Candidatos:
+        #     list1 = np.array(list(distancias_al_inicio.keys()))
+        #     list2 = np.array(list(Dic_Precedencias.keys()))
+        #     list3 = []
+        #     for element in list2:
+        #         if element in list1:
+        #             list3.append(element)
+        #     list3 = np.array(list3)
+
+        #     next_cluster = np.delete(np.array(list(distancias_al_inicio.keys())), np.array(list(Dic_Precedencias.keys())))[0]
+        #     Dic_Precedencias[next_cluster] = [prev_cluster]
 
         sub_distancias = {k: distancias_al_inicio[k] for k in Clusters_Candidatos}
         if not sub_distancias:
@@ -1345,4 +1251,82 @@ def Best_Cone(fase):
     initial_guess = (a_guess, b_guess, h_guess, x_c, y_c)
     result = sp.optimize.minimize(objective, initial_guess, constraints=constraints, method='SLSQP')
 
+    print(result)
     return result
+
+
+def Rampa(fase, Cone=[], Angulo_Descenso=np.arcsin(0.15), theta_0=0, t_final=2*5*np.pi, n=1000, orientation=1):
+    if not Cone:
+        raise Exception('Debe adjuntar cono')
+    if orientation >= 0:
+        orientation = 1
+    else:
+        orientation = -1
+
+
+    z_c = fase['z'].max()
+    p = -np.sin(Angulo_Descenso)
+    a_opt, b_opt, h_opt, x_opt, y_opt = Cone
+
+    T = np.linspace(0, t_final, n)
+    X_curve = []
+    Y_curve = []
+    Z_curve = []
+
+    z = z_c
+    theta = theta_0
+
+    x = a_opt*np.cos(theta_0) + x_opt
+    y = b_opt*np.sin(theta_0) + y_opt
+
+    X_curve.append(x)
+    Y_curve.append(y)
+    Z_curve.append(z_c)
+
+    for t in T:
+        if t == 0:
+            t0 = 0
+        else:
+            ra = (a_opt/h_opt)*(h_opt - z_c + z)
+            rb = (b_opt/h_opt)*(h_opt - z_c + z)
+            A = p**2 * (b_opt/h_opt)**2 * np.sin(theta) + p**2 * (b_opt/h_opt)**2 * np.cos(theta) + p**2 - 1
+            B = (2*p**2 * (b_opt/h_opt)*rb*np.sin(theta)*np.cos(theta) - 2*p**2 * (a_opt/h_opt)*ra*np.sin(theta)*np.cos(theta))
+            C = p**2 * rb**2 * np.cos(theta)**2 + p**2 * ra**2 * np.sin(theta)**2
+
+            dz = ((-B) + np.sqrt( B**2 - 4*A*C ))/(2*A)
+
+            theta_new = theta_0 + orientation*t
+            z_new = z + (t-t0)*dz
+
+            x = (a_opt/h_opt)*(h_opt-z_c+z_new)*np.cos(theta_new) + x_opt
+            y = (b_opt/h_opt)*(h_opt-z_c+z_new)*np.sin(theta_new) + y_opt
+
+            X_curve.append(x)
+            Y_curve.append(y)
+            Z_curve.append(z)
+
+            t0 = t
+            z = z_new
+            theta = theta_new
+
+    return X_curve, Y_curve, Z_curve
+
+def Puntos_Iniciales(fase, rampa):
+    X_curve, Y_curve, Z_curve = rampa
+    alturas = fase['z'].unique()
+    positions = []
+    for h in alturas:
+        counter = 0
+        for z in Z_curve:
+            if h > z:
+                positions.append(counter-1)
+                break
+            counter+=1
+
+    puntos_iniciales = []
+    counter = 0
+    for c in positions:
+        puntos_iniciales.append((float(X_curve[c]), float(Y_curve[c]), float(alturas[counter])))
+        counter+=1
+    
+    return puntos_iniciales
