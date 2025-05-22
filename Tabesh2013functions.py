@@ -1212,7 +1212,7 @@ def Coefficient_Variation(FaseBanco):
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 
-def Best_Cone(fase):
+def Best_Cone_by_Volume(fase, max_global_angle=45):
     x_c = fase['x'].mean()
     y_c = fase['y'].mean()
     z_c = fase['z'].max()
@@ -1220,9 +1220,9 @@ def Best_Cone(fase):
     # fase['z_c'] = np.ones(len(fase))*z_c
     points = np.array(fase[['x', 'y', 'z']])
 
-    a_guess = fase['x'].max() - fase['x'].min()
-    b_guess = fase['y'].max() - fase['y'].min()
-    h_guess = fase['z'].max()
+    a_guess = (2/3)*(fase['x'].max() - fase['x'].min())
+    b_guess = (2/3)*(fase['y'].max() - fase['y'].min())
+    h_guess = (4/3)*(fase['z'].max() - fase['z'].min())
 
     def objective(params):
         a, b, h, x_cone, y_cone = params
@@ -1248,6 +1248,199 @@ def Best_Cone(fase):
     
     constraints = [{'type': 'ineq', 'fun': constrainst_gen(p)} for p in points]
     
+    constraints.append({'type': 'ineq',
+                        'fun': lambda params: max_global_angle - np.arctan(params[2]/params[0])*180/np.pi})
+    
+    constraints.append({'type': 'ineq',
+                        'fun': lambda params: max_global_angle - np.arctan(params[2]/params[1])*180/np.pi})
+
+    initial_guess = (a_guess, b_guess, h_guess, x_c, y_c)
+    result = sp.optimize.minimize(objective, initial_guess, constraints=constraints, method='SLSQP')
+
+    print(result)
+    return result
+
+def profit(mina, params_cono, 
+           Minimum_base_area, 
+           BlockWidth, BlockHeight,
+           cm, cr, cp, P, FTL, R,
+           default_density,
+           ley_corte
+           ):
+    # T0 = time.time()
+    print('Calculando profit... \n')
+    a, b, h, x_cone, y_cone = params_cono
+    z_c = mina['z'].max()
+    # H = []
+    # MU = []
+    # X = []
+
+    # ID_blocks_within_cone = []
+    
+    Z = mina['z'].unique()
+
+    Profit = 0
+
+    for z in Z:
+        # print(z)
+
+        # t0 = time.time()
+        # X_z = []
+        # H_z = []
+        # MU_z = []
+
+        mina_a_altura_z = mina[mina['z']==z]
+
+        A_z = (a/h)*(h - z_c + z)
+        B_z = (b/h)*(h - z_c + z)
+        if (A_z <= 0):
+            continue
+        if np.pi*A_z*B_z < Minimum_base_area:
+            continue
+
+        M = np.array([[1/A_z**2, 0],
+                        [0, 1/B_z**2]])
+
+        X_values = []
+        Y_values = []
+        for id in mina_a_altura_z['id'].values:
+            bloque = mina[mina['id']==id]
+            x_bloque = bloque['x'].values[0]
+            y_bloque = bloque['y'].values[0]
+            P_bloque = np.array([x_bloque, y_bloque])
+            if 1 - (P_bloque-np.array((x_cone, y_cone))) @ M @ (P_bloque-np.array((x_cone, y_cone))) > 0:
+                P_0 = P_bloque
+                break
+        
+        X_values.append(P_0[0])
+        Y_values.append(P_0[1])
+
+        x_new = P_0[0] - BlockWidth
+        while x_new > x_cone - A_z:
+            X_values.append(x_new)
+            x_new -= BlockWidth
+        x_new = P_0[0] + BlockWidth
+        while x_new < x_cone + A_z:
+            X_values.append(x_new)
+            x_new += BlockWidth
+
+        y_new = P_0[1] - BlockHeight
+        while x_new > y_cone - B_z:
+            Y_values.append(y_new)
+            y_new -= BlockHeight
+        y_new = P_0[1] + BlockHeight
+        while y_new < y_cone + B_z:
+            Y_values.append(y_new)
+            y_new += BlockHeight
+        
+        X_values = sorted(X_values)
+        Y_values = sorted(Y_values)
+
+        N_x = len(X_values)
+        N_y = len(Y_values)
+        X_values, Y_values = np.meshgrid(X_values, Y_values)
+
+        # t1 = time.time()
+        # print('Calculo de malla')
+        # print(t1-t0)
+        # t0 = time.time()
+        for i in range(N_x):
+            for j in range(N_y):
+                P_bloque = (X_values[j][i], Y_values[j][i])
+                if 1 - (P_bloque-np.array((x_cone, y_cone))) @ M @ (P_bloque-np.array((x_cone, y_cone))) > 0:
+                    Bloque =  mina_a_altura_z[(mina_a_altura_z['x']==P_bloque[0]) & (mina_a_altura_z['y']==P_bloque[0])]
+                    # ID_blocks_within_cone.append(Bloque['id'].values[0])
+                    if Bloque.empty: #Bloque no está en DataFrame
+                        # X_z.append(default_density)
+                        # H_z.append(0)
+                        # MU_z.append(0)
+
+                        Profit = Profit - cm*default_density
+                    else:
+                        ley_bloque = Bloque['cut'].values[0]
+                        densidad_bloque = Bloque['density'].values[0]
+
+                        # X_z.append(Bloque['density'].values[0])
+                        # H_z.append(Bloque['cut'].values[0])
+                        if Bloque['cut'].values[0] >= ley_corte:
+                            # MU_z.append(1)
+                            
+                            Profit = Profit + (P-cr)*FTL*R*ley_bloque*densidad_bloque - (cm+cp)*densidad_bloque
+                        else:
+                            # MU_z.append(0)
+
+                            Profit = Profit - cm*densidad_bloque
+        
+        # x_extraido = np.array(X_z).sum()
+        # ley_media = np.array(H_z).mean()
+        # proporcion_fino = np.array(MU_z).sum()/len(MU_z)
+        # X.append(x_extraido)
+        # H.append(ley_media)
+        # MU.append(proporcion_fino)
+        # t1 = time.time()
+        # print('Calculo de params para profit')
+        # print(t1-t0)
+
+    # Profit = 0
+    # num_alturas = len(Z)
+
+    # for i in range(num_alturas):
+    #     Profit = Profit + (P-cr)*FTL*R*H[i]*MU[i]*X[i] - (cm+cp)*MU[i]*X[i] - cm*(1-MU[i])*X[i]
+
+    # T1 = time.time()
+    # print('\nCalculo total')
+    # print(T1-T0)
+    return Profit
+
+def Best_Cone_by_Profit(mina, P=4, cr=0.25, cm=2, cp=10, R=0.85, BlockWidth=10, BlockHeight=10, block_tolerance=4, max_global_angle=45, alpha_ley_corte=0, Minimum_base_area=0, default_density=0.25):
+    FTL = 2204.62
+    ley_marginal = cp/((P-cr)*FTL*R)
+    ley_critica = (cp+cm)/((P-cr)*FTL*R)
+
+    ley_corte = ((1-alpha_ley_corte)*ley_marginal + alpha_ley_corte*(ley_critica))*100
+    
+    x_c = mina['x'].mean()
+    y_c = mina['y'].mean()
+    z_c = mina['z'].max()
+
+    points = np.array(mina[['x', 'y', 'z']])
+
+    a_guess = (2/3)*(mina['x'].max() - mina['x'].min())
+    b_guess = (2/3)*(mina['y'].max() - mina['y'].min())
+    h_guess = (4/3)*(mina['z'].max() - mina['z'].min())
+
+    def objective(params):
+        a, b, h, x_cone, y_cone = params
+        varepsilon = 1e-2
+        if (a <= 0) or (b <= 0) or (h <= 0):
+            return np.inf
+        return -profit(mina, params, Minimum_base_area, BlockWidth, BlockHeight, cm, cr, cp, P, FTL, R, default_density, ley_corte) + varepsilon*abs(x_cone-x_c)**2 + varepsilon*abs(y_cone-y_c)**2
+    
+    def constrainst_gen(point):
+        z_c = mina['z'].max()
+        def constraint(params):
+            a, b, h, x_cone, y_cone = params
+            A = (a/h)*(h-z_c+point[2])
+            B = (b/h)*(h-z_c+point[2])
+            if A < 0:
+                A = 1e-12
+            if B < 0:
+                B = 1e-12
+            A += block_tolerance*BlockWidth
+            B += block_tolerance*BlockHeight
+            M = np.array([[1/A**2, 0],
+                        [0, 1/B**2]])
+            return 1 - (point[0:2]-np.array((x_cone, y_cone))) @ M @ (point[0:2]-np.array((x_cone, y_cone)))
+        return constraint
+    
+    constraints = [{'type': 'ineq', 'fun': constrainst_gen(p)} for p in points]
+
+    constraints.append({'type': 'ineq',
+                        'fun': lambda params: max_global_angle - np.arctan(params[2]/params[0])*180/np.pi})
+    
+    constraints.append({'type': 'ineq',
+                        'fun': lambda params: max_global_angle - np.arctan(params[2]/params[1])*180/np.pi})
+    
     initial_guess = (a_guess, b_guess, h_guess, x_c, y_c)
     result = sp.optimize.minimize(objective, initial_guess, constraints=constraints, method='SLSQP')
 
@@ -1255,7 +1448,8 @@ def Best_Cone(fase):
     return result
 
 
-def Rampa(fase, Cone=[], Angulo_Descenso=np.arcsin(0.15), theta_0=0, t_final=2*5*np.pi, n=1000, orientation=1):
+
+def Rampa(fase, Cone=[], Angulo_Descenso=np.arcsin(0.10), theta_0=0, t_final=2*5*np.pi, n=1000, orientation=1):
     if not Cone:
         raise Exception('Debe adjuntar cono')
     if orientation >= 0:
@@ -1330,3 +1524,4 @@ def Puntos_Iniciales(fase, rampa):
         counter+=1
     
     return puntos_iniciales
+# %%
