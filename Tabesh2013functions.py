@@ -9,6 +9,9 @@ import time
 
 import plotly.graph_objects as go
 
+from skopt.utils import use_named_args
+from skopt.space import Real
+
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Plotting %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%}
@@ -499,7 +502,7 @@ def plot_fase_banco(
 
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Implementation %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Clustering Implementation %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 def Calculate_Adjency_Matrix(FaseBanco, BlockWidth, BlockHeight, Sectores=[]):
     '''
@@ -1212,164 +1215,143 @@ def Coefficient_Variation(FaseBanco):
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 
-def Best_Cone_by_Volume(fase, max_global_angle=45):
-    x_c = fase['x'].mean()
-    y_c = fase['y'].mean()
-    z_c = fase['z'].max()
-
-    points = np.array(fase[['x', 'y', 'z']])
-
-    a_guess = (2/3)*(fase['x'].max() - fase['x'].min())
-    b_guess = (2/3)*(fase['y'].max() - fase['y'].min())
-    h_guess = (4/3)*(fase['z'].max() - fase['z'].min())
-    alpha_guess = 0
-
-    def objective(params):
-        a, b, h, x_cone, y_cone, alpha = params
-        varepsilon = 1e-2
-        if (a <= 0) or (b <= 0) or (h <= 0):
-            return 1e20
-        return (1/3)*np.pi*a*b*h + varepsilon*abs(x_cone-x_c)**2 + varepsilon*abs(y_cone-y_c)**2
     
-    def constrainst_gen(point):
-        z_c = fase['z'].max()
-        def constraint(params):
-            a, b, h, x_cone, y_cone, alpha = params
-            A = (a/h)*(h-z_c+point[2])
-            B = (b/h)*(h-z_c+point[2])
-            if A < 0:
-                A = 1e-12
-            if B < 0:
-                B = 1e-12
-            M = np.array([[1/A**2, 0],
-                        [0, 1/B**2]])
-            Rot = np.array([[np.cos(alpha), -np.sin(alpha)],
-                      [np.sin(alpha), np.cos(alpha)]])
-            Rot_inv = np.transpose(Rot)
-            E = Rot_inv @ M @ Rot
-            return 1 - (point[0:2]-np.array((x_cone, y_cone))) @ E @ (point[0:2]-np.array((x_cone, y_cone)))
-        return constraint
+
+# # Demasiado caro de evaluar
+# def profit(mina, params_cono, 
+#            Minimum_base_area, 
+#            BlockWidth, BlockHeight,
+#            cm, cr, cp, P, FTL, R,
+#            default_density,
+#            ley_corte
+#            ):
+#     print('Calculando profit... \n')
+#     a, b, h, x_cone, y_cone, alpha = params_cono
+#     z_c = mina['z'].max()
     
-    constraints = [{'type': 'ineq', 'fun': constrainst_gen(p)} for p in points]
-    
-    constraints.append({'type': 'ineq',
-                        'fun': lambda params: max_global_angle - np.arctan(params[2]/params[0])*180/np.pi})
-    
-    constraints.append({'type': 'ineq',
-                        'fun': lambda params: max_global_angle - np.arctan(params[2]/params[1])*180/np.pi})
+#     Z = mina['z'].unique()
 
-    constraints.append({'type': 'ineq',
-                        'fun': lambda params: np.pi/2 - params[5]})
-    
-    constraints.append({'type': 'ineq',
-                        'fun': lambda params: params[5] + np.pi/2})
+#     Profit = 0
 
-    initial_guess = (a_guess, b_guess, h_guess, x_c, y_c, alpha_guess)
-    result = sp.optimize.minimize(objective, initial_guess, constraints=constraints, method='SLSQP')
+#     for z in Z:
+#         mina_a_altura_z = mina[mina['z']==z]
 
-    print(result)
-    return result
+#         A_z = (a/h)*(h - z_c + z)
+#         B_z = (b/h)*(h - z_c + z)
+#         if (A_z <= 0):
+#             continue
+#         if np.pi*A_z*B_z < Minimum_base_area:
+#             continue
 
-def profit(mina, params_cono, 
-           Minimum_base_area, 
-           BlockWidth, BlockHeight,
-           cm, cr, cp, P, FTL, R,
-           default_density,
-           ley_corte
-           ):
-    print('Calculando profit... \n')
-    a, b, h, x_cone, y_cone, alpha = params_cono
-    z_c = mina['z'].max()
-    
-    Z = mina['z'].unique()
-
-    Profit = 0
-
-    for z in Z:
-        mina_a_altura_z = mina[mina['z']==z]
-
-        A_z = (a/h)*(h - z_c + z)
-        B_z = (b/h)*(h - z_c + z)
-        if (A_z <= 0):
-            continue
-        if np.pi*A_z*B_z < Minimum_base_area:
-            continue
-
-        M = np.array([[1/A_z**2, 0],
-                        [0, 1/B_z**2]])
+#         M = np.array([[1/A_z**2, 0],
+#                         [0, 1/B_z**2]])
         
-        Rot = np.array([[np.cos(alpha), -np.sin(alpha)],
-                      [np.sin(alpha), np.cos(alpha)]])
-        Rot_inv = np.transpose(Rot)
+#         Rot = np.array([[np.cos(alpha), -np.sin(alpha)],
+#                       [np.sin(alpha), np.cos(alpha)]])
+#         Rot_inv = np.transpose(Rot)
 
-        E = Rot_inv @ M @ Rot
+#         E = Rot_inv @ M @ Rot
 
-        X_values = []
-        Y_values = []
-        P_0 = []
-        for id in mina_a_altura_z['id'].values:
-            bloque = mina[mina['id']==id]
-            x_bloque = bloque['x'].values[0]
-            y_bloque = bloque['y'].values[0]
-            P_bloque = np.array([x_bloque, y_bloque])
-            if 1 - (P_bloque-np.array((x_cone, y_cone))) @ E @ (P_bloque-np.array((x_cone, y_cone))) > 0:
-                P_0 = P_bloque
-                break
+#         X_values = []
+#         Y_values = []
+#         P_0 = []
+#         for id in mina_a_altura_z['id'].values:
+#             bloque = mina[mina['id']==id]
+#             x_bloque = bloque['x'].values[0]
+#             y_bloque = bloque['y'].values[0]
+#             P_bloque = np.array([x_bloque, y_bloque])
+#             if 1 - (P_bloque-np.array((x_cone, y_cone))) @ E @ (P_bloque-np.array((x_cone, y_cone))) > 0:
+#                 P_0 = P_bloque
+#                 break
         
-        if len(P_0)==0:
-            continue
+#         if len(P_0)==0:
+#             continue
         
-        X_values.append(P_0[0])
-        Y_values.append(P_0[1])
+#         X_values.append(P_0[0])
+#         Y_values.append(P_0[1])
 
-        x_new = P_0[0] - BlockWidth
-        while x_new > x_cone - A_z:
-            X_values.append(x_new)
-            x_new -= BlockWidth
-        x_new = P_0[0] + BlockWidth
-        while x_new < x_cone + A_z:
-            X_values.append(x_new)
-            x_new += BlockWidth
+#         x_new = P_0[0] - BlockWidth
+#         while x_new > x_cone - A_z:
+#             X_values.append(x_new)
+#             x_new -= BlockWidth
+#         x_new = P_0[0] + BlockWidth
+#         while x_new < x_cone + A_z:
+#             X_values.append(x_new)
+#             x_new += BlockWidth
 
-        y_new = P_0[1] - BlockHeight
-        while x_new > y_cone - B_z:
-            Y_values.append(y_new)
-            y_new -= BlockHeight
-        y_new = P_0[1] + BlockHeight
-        while y_new < y_cone + B_z:
-            Y_values.append(y_new)
-            y_new += BlockHeight
+#         y_new = P_0[1] - BlockHeight
+#         while x_new > y_cone - B_z:
+#             Y_values.append(y_new)
+#             y_new -= BlockHeight
+#         y_new = P_0[1] + BlockHeight
+#         while y_new < y_cone + B_z:
+#             Y_values.append(y_new)
+#             y_new += BlockHeight
         
-        X_values = sorted(X_values)
-        Y_values = sorted(Y_values)
+#         X_values = sorted(X_values)
+#         Y_values = sorted(Y_values)
 
-        N_x = len(X_values)
-        N_y = len(Y_values)
-        X_values, Y_values = np.meshgrid(X_values, Y_values)
+#         N_x = len(X_values)
+#         N_y = len(Y_values)
+#         X_values, Y_values = np.meshgrid(X_values, Y_values)
 
-        for i in range(N_x):
-            for j in range(N_y):
-                P_bloque = (X_values[j][i], Y_values[j][i])
+#         for i in range(N_x):
+#             for j in range(N_y):
+#                 P_bloque = (X_values[j][i], Y_values[j][i])
 
-                if 1 - (P_bloque-np.array((x_cone, y_cone))) @ E @ (P_bloque-np.array((x_cone, y_cone))) > 0:
-                    Bloque =  mina_a_altura_z[
-                        (mina_a_altura_z['x']==P_bloque[0]) & 
-                        (mina_a_altura_z['y']==P_bloque[1])]
+#                 if 1 - (P_bloque-np.array((x_cone, y_cone))) @ E @ (P_bloque-np.array((x_cone, y_cone))) > 0:
+#                     Bloque =  mina_a_altura_z[
+#                         (mina_a_altura_z['x']==P_bloque[0]) & 
+#                         (mina_a_altura_z['y']==P_bloque[1])]
 
-                    if Bloque.empty: #Bloque no está en DataFrame
+#                     if Bloque.empty: #Bloque no está en DataFrame
 
-                        Profit = Profit - cm*default_density
-                    else:
-                        ley_bloque = Bloque['cut'].values[0]
-                        densidad_bloque = Bloque['density'].values[0]
+#                         Profit = Profit - cm*default_density
+#                     else:
+#                         ley_bloque = Bloque['cut'].values[0]
+#                         densidad_bloque = Bloque['density'].values[0]
 
-                        if ley_bloque >= ley_corte:
-                            Profit = Profit + (P-cr)*FTL*R*ley_bloque*densidad_bloque - (cm+cp)*densidad_bloque
-                        else:
-                            Profit = Profit - cm*densidad_bloque
-    return Profit
+#                         if ley_bloque >= ley_corte:
+#                             Profit = Profit + (P-cr)*FTL*R*ley_bloque*densidad_bloque - (cm+cp)*densidad_bloque
+#                         else:
+#                             Profit = Profit - cm*densidad_bloque
+#     return Profit
 
+# def continuous_profit(mina, params_cono, 
+#            Minimum_base_area, 
+#            BlockWidth, BlockHeight, BlockHeightZ,
+#            cm, cr, cp, P, FTL, R,
+#            default_density,
+#            ley_corte,
+#            aproximator='uniform'
+#            ):
+#     a, b, h, x_cone, y_cone, alpha = params_cono
+#     z_c = mina['z'].max()
 
+#     Profit = 0
+
+#     mina_df = mina.copy()
+
+#     X_values = sorted(mina['x'].unique())+BlockWidth/2
+#     Y_values = sorted(mina['y'].unique())+BlockHeight/2
+#     Z_values = sorted(mina['z'].unique())+BlockHeightZ/2
+
+#     def densidad_profit(posicion):
+#         x0, y0, z0 = posicion
+#         for x in X_values:
+#             if x>x0:
+#                 X_Bloque = x-BlockWidth/2
+#         for y in Y_values:
+#             if y>y0:
+#                 Y_Bloque = y-BlockHeight/2
+#         for z in Z_values:
+#             if z>z0:
+#                 Z_Bloque = z-BlockHeightZ/2
+#         Bloque = mina[
+#                     mina['x']==X_Bloque &
+#                     mina['y']==Y_Bloque &
+#                     mina['z']==Z_Bloque
+#         ]
 
 
 # # Primer try: No sirve pues Profit no es diferenciable
@@ -1428,56 +1410,336 @@ def profit(mina, params_cono,
 #     print(result)
 #     return result
 
-# # Second Try: Demasiado tiempo de cómputo
-# def Best_Cone_by_Profit_second_try(mina, P=4, cr=0.25, cm=2, cp=10, R=0.85, BlockWidth=10, BlockHeight=10, block_tolerance=4, max_global_angle=45, alpha_ley_corte=0, Minimum_base_area=0, default_density=0.25):
-#     FTL = 2204.62
-#     ley_marginal = cp/((P-cr)*FTL*R)
-#     ley_critica = (cp+cm)/((P-cr)*FTL*R)
+# Second Try: Demasiado tiempo de cómputo
 
-#     ley_corte = ((1-alpha_ley_corte)*ley_marginal + alpha_ley_corte*(ley_critica))*100
+
+
+###########################################################################################
+########################### Relleno de mina + Cálculo de profit ###########################
+###########################################################################################
+
+
+def relleno_mina(mina, default_density,
+                 BlockWidth, BlockHeight, BlockHeightZ,
+                 cm, cr, cp, P, FTL, R, ley_corte,
+                 relleno_lateral=30):
+    mina_rellenada = mina.copy()
+    new_blocks = pd.DataFrame({
+        col: pd.Series(dtype=mina[col].dtype) for col in mina.columns
+    })
+
+    x_min = mina['x'].min()
+    x_max = mina['x'].max()
+    y_min = mina['y'].min()
+    y_max = mina['y'].max()
+
+    X_values = mina['x'].unique()
+    Y_values = mina['y'].unique()
+    Z_values = mina['z'].unique()
+
+    for i in range(1, relleno_lateral+1):
+        x_inf_new = x_min - i*BlockWidth
+        x_sup_new = x_max + i*BlockWidth
+        y_inf_new = y_min - i*BlockHeight
+        y_sup_new = y_max + i*BlockHeight
+
+        X_values = np.append(X_values, [x_inf_new, x_sup_new])
+        Y_values = np.append(Y_values, [y_inf_new, y_sup_new])
+
+    X_values = sorted(set(X_values))
+    Y_values = sorted(set(Y_values))
+
+    for x in X_values:
+        for y in Y_values:
+            in_mina = mina[(mina['x']==x) & (mina['y']==y)]
+            if in_mina.empty:
+                to_add = pd.DataFrame(data=0, columns=new_blocks.columns, index=range(len(Z_values)))
+                
+                to_add['x'] = [x]*len(Z_values)
+                to_add['y'] = [y]*len(Z_values)
+                to_add['z'] = Z_values
+
+                to_add['density'] = [default_density]*len(Z_values)
+
+                new_blocks = pd.concat([new_blocks, to_add], ignore_index=True)
+            else:
+                z_in_mina = in_mina['z'].unique()
+
+                z_to_add = list(set(Z_values) - set(z_in_mina))
+                z_max_loc = np.array(z_in_mina).max()
+
+                to_add = pd.DataFrame(data=0, columns=new_blocks.columns, index=range(len(z_to_add)))
+                to_add['x'] = [x]*len(z_to_add)
+                to_add['y'] = [y]*len(z_to_add)
+                to_add['z'] = z_to_add
+
+                to_add['density'] = np.where(to_add['z']<z_max_loc, default_density, 0)
+
+                new_blocks = pd.concat([new_blocks, to_add], ignore_index=True)
+
+
+    mina_rellenada = pd.concat([mina_rellenada, new_blocks], ignore_index=True)
+
+
+    Block_Vol = BlockWidth * BlockHeight * BlockHeightZ
+
+    mina_rellenada['value'] = np.where(
+        mina_rellenada['cut']<ley_corte, 
+        -cm*mina_rellenada['density']*Block_Vol, 
+        (P-cr)*FTL*R*mina_rellenada['cut']*mina_rellenada['density']*Block_Vol - (cp+cm)*mina_rellenada['density']*Block_Vol)
+
+    return mina_rellenada
+
+
+def isin_cone(mina_rellena, params_cono, Minimum_base_area=0, horizontal_tolerance=0):
+    a, b, h, x_cone, y_cone, alpha = params_cono
+    z_c = mina_rellena['z'].max()
+
+    a += horizontal_tolerance
+    b += horizontal_tolerance
+
+
+    M = np.array([[1/a**2, 0],
+                        [0, 1/b**2]])
+        
+    Rot = np.array([[np.cos(alpha), -np.sin(alpha)],
+                    [np.sin(alpha), np.cos(alpha)]])
+    Rot_inv = np.transpose(Rot)
+
+    E = Rot_inv @ M @ Rot
+
+    x = np.asarray(mina_rellena['x'])
+    y = np.asarray(mina_rellena['y'])
+    z = np.asarray(mina_rellena['z'])
+
+    z_rel = (h-z_c+z)/h
+    norm_rel = E[0,0]*(x-x_cone)**2 + 2*E[0,1]*(x-x_cone)*(y-y_cone) + E[1,1]*(y-y_cone)**2
+
+    points_in = pd.Series(norm_rel<=z_rel**2, name='isin_cone')
+
+    if Minimum_base_area > 0:
+        Z = sorted(mina_rellena['z'].unique())
+        Z_rel = (h-z_c+Z)/h
+
+        A_z = a*Z_rel
+        B_z = b*Z_rel
+
+        Areas_z = np.pi*A_z*B_z
+        if Minimum_base_area >= Areas_z.max():
+            Warning('Valor de Minimum_base_area demasiado alto.')
+            return pd.Series()
+        
+        index_z_min = np.where(1 - (Areas_z<Minimum_base_area))[0].min()
+
+        z_min = Z[index_z_min]
+
+        points_in = points_in*(mina_rellena['z']>=z_min)
+
+    return points_in
+
+def profit(mina_rellena, params_cono, Minimum_base_area=0, horizontal_tolerance=0):
+    points_in_cone = mina_rellena[isin_cone(mina_rellena, params_cono, 
+                                            Minimum_base_area=Minimum_base_area, 
+                                            horizontal_tolerance=horizontal_tolerance)]
+
+    return points_in_cone['value'].sum()
+
+
+
+
+
+#########################################################################################
+############################# Optimización para mejor cono ##############################
+#########################################################################################
+
+def Best_Cone_by_Volume(fase, max_global_angle=45):
+    x_c = fase['x'].mean()
+    y_c = fase['y'].mean()
+    z_c = fase['z'].max()
+
+    points = np.array(fase[['x', 'y', 'z']])
+
+    a_guess = (2/3)*(fase['x'].max() - fase['x'].min())
+    b_guess = (2/3)*(fase['y'].max() - fase['y'].min())
+    h_guess = (4/3)*(fase['z'].max() - fase['z'].min())
+    alpha_guess = 0
+
+    def objective(params):
+        a, b, h, x_cone, y_cone, alpha = params
+        varepsilon = 1e-2
+        if (a <= 0) or (b <= 0) or (h <= 0):
+            return 1e20
+        return (1/3)*np.pi*a*b*h + varepsilon*abs(x_cone-x_c)**2 + varepsilon*abs(y_cone-y_c)**2
     
-#     x_c = mina['x'].mean()
-#     y_c = mina['y'].mean()
-#     z_c = mina['z'].max()
-
-#     # points = np.array(mina[['x', 'y', 'z']])
-
-#     # a_guess = (2/3)*(mina['x'].max() - mina['x'].min())
-#     # b_guess = (2/3)*(mina['y'].max() - mina['y'].min())
-#     # h_guess = (4/3)*(mina['z'].max() - mina['z'].min())
-
-#     a_low = (1/2)*(mina['x'].max() - mina['x'].min())
-#     a_up = (2)*(mina['x'].max() - mina['x'].min())
-
-#     b_low = (1/2)*(mina['y'].max() - mina['y'].min())
-#     b_up = (2)*(mina['y'].max() - mina['y'].min())
-
-#     h_low = (1/2)*(mina['z'].max() - mina['z'].min())
-#     h_up = (2)*(mina['z'].max() - mina['z'].min())
-
-#     alpha_x = 0.2
-#     x_low = (1-alpha_x)*mina['x'].min() + (alpha_x)*mina['x'].max()
-#     x_up = (alpha_x)*mina['x'].min() + (1-alpha_x)*mina['x'].max()
-
-#     alpha_y = 0.2
-#     y_low = (1-alpha_y)*mina['y'].min() + (alpha_y)*mina['y'].max()
-#     y_up = (alpha_y)*mina['y'].min() + (1-alpha_y)*mina['y'].max()
-
-
-#     def objective(params):
-#         a, b, h, x_cone, y_cone = params
-#         varepsilon = 1e-2
-#         if (a <= 0) or (b <= 0) or (h <= 0):
-#             return np.inf
-#         return -profit(mina, params, Minimum_base_area, BlockWidth, BlockHeight, cm, cr, cp, P, FTL, R, default_density, ley_corte) + varepsilon*abs(x_cone-x_c)**2 + varepsilon*abs(y_cone-y_c)**2
+    def constrainst_gen(point):
+        z_c = fase['z'].max()
+        def constraint(params):
+            a, b, h, x_cone, y_cone, alpha = params
+            A = (a/h)*(h-z_c+point[2])
+            B = (b/h)*(h-z_c+point[2])
+            if A < 0:
+                A = 1e-12
+            if B < 0:
+                B = 1e-12
+            M = np.array([[1/A**2, 0],
+                        [0, 1/B**2]])
+            Rot = np.array([[np.cos(alpha), -np.sin(alpha)],
+                      [np.sin(alpha), np.cos(alpha)]])
+            Rot_inv = np.transpose(Rot)
+            E = Rot_inv @ M @ Rot
+            return 1 - (point[0:2]-np.array((x_cone, y_cone))) @ E @ (point[0:2]-np.array((x_cone, y_cone)))
+        return constraint
     
-#     bounds = [(a_low, a_up), (b_low, b_up), (h_low, h_up), (x_low, x_up), (y_low, y_up)]
+    constraints = [{'type': 'ineq', 'fun': constrainst_gen(p)} for p in points]
+    
+    constraints.append({'type': 'ineq',
+                        'fun': lambda params: max_global_angle - np.arctan(params[2]/params[0])*180/np.pi})
+    
+    constraints.append({'type': 'ineq',
+                        'fun': lambda params: max_global_angle - np.arctan(params[2]/params[1])*180/np.pi})
 
-#     result = sp.optimize.differential_evolution(objective, bounds, maxiter=5, popsize=3, polish=True, disp=True, workers=-1)
+    constraints.append({'type': 'ineq',
+                        'fun': lambda params: np.pi/2 - params[5]})
+    
+    constraints.append({'type': 'ineq',
+                        'fun': lambda params: params[5] + np.pi/2})
 
-#     return result
+    initial_guess = (a_guess, b_guess, h_guess, x_c, y_c, alpha_guess)
+    result = sp.optimize.minimize(objective, initial_guess, constraints=constraints, method='SLSQP')
+
+    print(result)
+    return result
 
 
+def Best_Cone_by_Profit_diff_evol(mina, max_global_angle=45, Minimum_base_area=0, maxiter=1000, popsize=15, polish=True, init='latinhypercube', strategy='best1bin', mutation=(0.5, 1), recombination=0.7, rng=None):
+    
+    x_c = mina['x'].mean()
+    y_c = mina['y'].mean()
+    z_c = mina['z'].max()
+
+    a_low = (1/3)*(mina['x'].max() - mina['x'].min())
+    a_up = (2)*(mina['x'].max() - mina['x'].min())
+
+    b_low = (1/3)*(mina['y'].max() - mina['y'].min())
+    b_up = (2)*(mina['y'].max() - mina['y'].min())
+
+    h_low = (1/3)*(mina['z'].max() - mina['z'].min())
+    h_up = (2)*(mina['z'].max() - mina['z'].min())
+
+    lambda_x = 0
+    x_low = (1-lambda_x)*mina['x'].min() + (lambda_x)*mina['x'].max()
+    x_up = (lambda_x)*mina['x'].min() + (1-lambda_x)*mina['x'].max()
+
+    lambda_y = 0
+    y_low = (1-lambda_y)*mina['y'].min() + (lambda_y)*mina['y'].max()
+    y_up = (lambda_y)*mina['y'].min() + (1-lambda_y)*mina['y'].max()
+
+
+    def objective(params):
+        a, b, h, x_cone, y_cone, alpha = params
+        varepsilon = 1e-2
+
+        if np.arctan(h/a)*180/np.pi > max_global_angle:
+            return 1e20
+        if np.arctan(h/b)*180/np.pi > max_global_angle:
+            return 1e20
+        if (a <= 0) or (b <= 0) or (h <= 0):
+            return 1e20
+        
+        return -profit(mina, params, Minimum_base_area) + varepsilon*abs(x_cone-x_c)**2 + varepsilon*abs(y_cone-y_c)**2
+    
+    bounds = [(a_low, a_up), (b_low, b_up), (h_low, h_up), (x_low, x_up), (y_low, y_up), (-np.pi/2, np.pi/2)]
+
+    result = sp.optimize.differential_evolution(objective, bounds, maxiter=maxiter, popsize=popsize, polish=polish, disp=True, workers=1, init=init, strategy=strategy, mutation=mutation, recombination=recombination, rng=rng)
+
+    return result
+
+
+def Best_Cone_by_Profit_basinhopping(mina, max_global_angle=45, Minimum_base_area=0, niter=1000, T=1, stepsize=0.5):
+    
+    x_c = mina['x'].mean()
+    y_c = mina['y'].mean()
+    z_c = mina['z'].max()
+
+    norm_a = mina['x'].max() - mina['x'].min()
+    norm_b = mina['y'].max() - mina['y'].min()
+    norm_h = mina['z'].max() - mina['z'].min()
+    diam = (norm_a+norm_b)/2 # "diametro de la mina"
+
+    a_guess = 4/3
+    b_guess = 4/3
+    h_guess = 1
+    x_guess = 0
+    y_guess = 0
+    alpha_guess = 0
+
+    x0 = np.array([a_guess, b_guess, h_guess, x_guess, y_guess, alpha_guess])
+
+    def objective(params):
+        a, b, h, x_cone, y_cone, alpha = params
+        varepsilon = 1e-2
+
+        a = norm_a*a
+        b = norm_b*b
+        h = norm_h*h
+        x_cone = x_c + diam*x_cone
+        y_cone = y_c + diam*y_cone
+        alpha = (np.pi/2)*alpha
+
+        if np.arctan(h/a)*180/np.pi > max_global_angle:
+            return 1e20
+        if np.arctan(h/b)*180/np.pi > max_global_angle:
+            return 1e20
+        if (a <= 0) or (b <= 0) or (h <= 0):
+            return 1e20
+        
+        return -profit(mina, [a,b,h,x_cone,y_cone,alpha], Minimum_base_area) + varepsilon*abs(x_cone-x_c)**2 + varepsilon*abs(y_cone-y_c)**2
+
+
+    result = sp.optimize.basinhopping(objective, x0, niter=niter, T=T, stepsize=stepsize, disp=True)
+
+    return result
+
+
+# Enfoque Scikit
+def make_search_space(amin, amax, bmin, bmax, hmin, hmax, xmin, xmax, ymin, ymax, alphamin, alphamax):
+    return [
+        Real(amin, amax, name="a"),
+        Real(bmin, bmax, name="b"),
+        Real(hmin, hmax, name="h"),
+        Real(xmin, xmax, name="x_cone"),
+        Real(ymin, ymax, name="y_cone"),
+        Real(alphamin, alphamax, name='alpha')
+    ]
+
+def make_objective(mina,
+                   Minimum_base_area,
+                   max_global_angle,
+                   horizontal_tolerance,
+                   x_c, y_c,
+                   varepsilon,
+                   search_space):
+
+    @use_named_args(search_space)
+    def objective(a, b, h, x_cone, y_cone, alpha):
+        try:
+            if np.arctan(h/a)*180/np.pi > max_global_angle:
+                return 1e20
+            if np.arctan(h/b)*180/np.pi > max_global_angle:
+                return 1e20
+            val = profit(mina, [a, b, h, x_cone, y_cone, alpha], Minimum_base_area=Minimum_base_area, horizontal_tolerance=horizontal_tolerance)
+            penalty = varepsilon * ((x_cone - x_c)**2 + (y_cone - y_c)**2)
+            return -val + penalty
+        except Exception as e:
+            print(f"Error: {e}")
+            return 1e20  # Penalización si falla
+
+    return objective
+
+
+#########################################################################################
+####################### Rampa y puntos iniciales para clustering ########################
+#########################################################################################
 
 
 
@@ -1492,7 +1754,7 @@ def Rampa(fase, Cone=[], Angulo_Descenso=np.arcsin(0.10), theta_0=0, t_final=2*5
 
     z_c = fase['z'].max()
     p = -np.sin(Angulo_Descenso)
-    a_opt, b_opt, h_opt, x_opt, y_opt = Cone
+    a_opt, b_opt, h_opt, x_opt, y_opt, alpha_opt = Cone
 
     T = np.linspace(0, t_final, n)
     X_curve = []
@@ -1556,3 +1818,4 @@ def Puntos_Iniciales(fase, rampa):
         counter+=1
     
     return puntos_iniciales
+
