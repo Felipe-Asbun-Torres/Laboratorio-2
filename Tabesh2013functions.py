@@ -1743,7 +1743,7 @@ def make_objective(mina,
 
 
 
-def Rampa(fase, Cone=[], Angulo_Descenso=np.arcsin(0.10), theta_0=0, t_final=2*5*np.pi, n=1000, orientation=1):
+def Rampa_old(fase, Cone=[], Angulo_Descenso=np.arcsin(0.10), theta_0=0, t_final=2*5*np.pi, n=1000, orientation=1):
     if not Cone:
         raise Exception('Debe adjuntar cono')
     if orientation >= 0:
@@ -1799,7 +1799,7 @@ def Rampa(fase, Cone=[], Angulo_Descenso=np.arcsin(0.10), theta_0=0, t_final=2*5
 
     return X_curve, Y_curve, Z_curve
 
-def Rampa_2(fase, Cone=None, Angulo_Descenso=np.arcsin(0.10), theta_0=0, t_final=2*5*np.pi, n=1000, orientation=1):
+def Rampa(fase, Cone=None, Angulo_Descenso=np.arcsin(0.10), theta_0=0, t_final=2*5*np.pi, n=1000, orientation=1):
     if Cone is None or len(Cone)==0:
         raise Exception('Debe adjuntar cono')
     if orientation >= 0:
