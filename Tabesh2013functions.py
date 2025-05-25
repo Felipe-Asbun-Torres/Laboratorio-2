@@ -1799,6 +1799,64 @@ def Rampa(fase, Cone=[], Angulo_Descenso=np.arcsin(0.10), theta_0=0, t_final=2*5
 
     return X_curve, Y_curve, Z_curve
 
+def Rampa_2(fase, Cone=None, Angulo_Descenso=np.arcsin(0.10), theta_0=0, t_final=2*5*np.pi, n=1000, orientation=1):
+    if Cone is None or len(Cone)==0:
+        raise Exception('Debe adjuntar cono')
+    if orientation >= 0:
+        orientation = 1
+    else:
+        orientation = -1
+    
+    z_c = fase['z'].max()
+    p = -np.sin(Angulo_Descenso)
+    a, b, h, x_cone, y_cone, alpha_cone = Cone
+
+    T = np.linspace(0, t_final, n)
+    X_curve = []
+    Y_curve = []
+    Z_curve = []
+
+    z = z_c
+    theta = theta_0
+
+    x = (a*np.cos(theta_0)*np.cos(alpha_cone) - b*np.sin(theta_0)*np.sin(alpha_cone)) + x_cone
+    y = (a*np.cos(theta_0)*np.sin(alpha_cone) + b*np.sin(theta_0)*np.cos(alpha_cone)) + y_cone
+
+    X_curve.append(x)
+    Y_curve.append(y)
+    Z_curve.append(z)
+    
+    for t in T:
+        if t == 0:
+            t0 = 0
+        else:
+            R_1 = a*np.cos(theta)*np.cos(alpha_cone) - b*np.sin(theta)*np.sin(alpha_cone)
+            dR_1 = (-a*np.sin(theta)*np.cos(alpha_cone) - b*np.cos(theta)*np.sin(alpha_cone))*orientation
+            R_2 = a*np.cos(theta)*np.sin(alpha_cone) + b*np.sin(theta)*np.cos(alpha_cone)
+            dR_2 = (-a*np.sin(theta)*np.sin(alpha_cone) + b*np.cos(theta)*np.cos(alpha_cone))*orientation
+
+            A = p**2 - 1 + p**2 * R_1**2/h**2 + p**2 * R_2**2/h**2
+            B = (2*p**2/h)*(R_1*dR_1 + R_2*dR_2)*(1-z_c/h + z/h)
+            C = p**2*(dR_1**2 + dR_2**2)*(1 - z_c/h + z/h)**2
+
+            dz = ((-B) + np.sqrt( B**2 - 4*A*C ))/(2*A)
+
+            theta_new = theta_0 + orientation*t
+            z_new = z + (t-t0)*dz
+
+            x = (a*np.cos(theta_new)*np.cos(alpha_cone) - b*np.sin(theta_new)*np.sin(alpha_cone))*(1-z_c/h+z_new/h) + x_cone
+            y = (a*np.cos(theta_new)*np.sin(alpha_cone) + b*np.sin(theta_new)*np.cos(alpha_cone))*(1-z_c/h+z_new/h) + y_cone
+
+            X_curve.append(x)
+            Y_curve.append(y)
+            Z_curve.append(z)
+
+            t0 = t
+            z = z_new
+            theta = theta_new
+
+    return X_curve, Y_curve, Z_curve
+
 def Puntos_Iniciales(fase, rampa):
     X_curve, Y_curve, Z_curve = rampa
     alturas = fase['z'].unique()
