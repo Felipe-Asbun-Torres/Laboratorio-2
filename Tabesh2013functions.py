@@ -7,10 +7,14 @@ import matplotlib.patches as patches
 import matplotlib.colors as mcolors 
 import time
 
+
+
 import plotly.graph_objects as go
 
 from skopt.utils import use_named_args
 from skopt.space import Real
+from itertools import product
+
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Plotting %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -88,7 +92,7 @@ def plot_fase_3D(fase, width=900, height=800, column_hue='cluster', elipses=[], 
             name='Rampa'
         ))
     
-    if points:
+    if len(points)>0:
         X = [p[0] for p in points]
         Y = [p[1] for p in points]
         Z = [p[2] for p in points]
@@ -1419,76 +1423,152 @@ def Coefficient_Variation(FaseBanco):
 ###########################################################################################
 
 
+# def relleno_mina(mina, default_density,
+#                  BlockWidth, BlockHeight, BlockHeightZ,
+#                  cm, cr, cp, P, FTL, R, ley_corte,
+#                  relleno_lateral=30):
+#     mina_rellenada = mina.copy()
+#     new_blocks = pd.DataFrame({
+#         col: pd.Series(dtype=mina[col].dtype) for col in mina.columns
+#     })
+
+#     x_min = mina['x'].min()
+#     x_max = mina['x'].max()
+#     y_min = mina['y'].min()
+#     y_max = mina['y'].max()
+
+#     X_values = mina['x'].unique()
+#     Y_values = mina['y'].unique()
+#     Z_values = mina['z'].unique()
+
+#     for i in range(1, relleno_lateral+1):
+#         x_inf_new = x_min - i*BlockWidth
+#         x_sup_new = x_max + i*BlockWidth
+#         y_inf_new = y_min - i*BlockHeight
+#         y_sup_new = y_max + i*BlockHeight
+
+#         X_values = np.append(X_values, [x_inf_new, x_sup_new])
+#         Y_values = np.append(Y_values, [y_inf_new, y_sup_new])
+
+#     X_values = sorted(set(X_values))
+#     Y_values = sorted(set(Y_values))
+
+#     for x in X_values:
+#         for y in Y_values:
+#             in_mina = mina[(mina['x']==x) & (mina['y']==y)]
+#             if in_mina.empty:
+#                 to_add = pd.DataFrame(data=0, columns=new_blocks.columns, index=range(len(Z_values)))
+                
+#                 to_add['x'] = [x]*len(Z_values)
+#                 to_add['y'] = [y]*len(Z_values)
+#                 to_add['z'] = Z_values
+
+#                 to_add['density'] = [default_density]*len(Z_values)
+
+#                 new_blocks = pd.concat([new_blocks, to_add], ignore_index=True)
+#             else:
+#                 z_in_mina = in_mina['z'].unique()
+
+#                 z_to_add = list(set(Z_values) - set(z_in_mina))
+#                 z_max_loc = np.array(z_in_mina).max()
+
+#                 to_add = pd.DataFrame(data=0, columns=new_blocks.columns, index=range(len(z_to_add)))
+#                 to_add['x'] = [x]*len(z_to_add)
+#                 to_add['y'] = [y]*len(z_to_add)
+#                 to_add['z'] = z_to_add
+
+#                 to_add['density'] = np.where(to_add['z']<z_max_loc, default_density, 0)
+
+#                 new_blocks = pd.concat([new_blocks, to_add], ignore_index=True)
+
+
+#     mina_rellenada = pd.concat([mina_rellenada, new_blocks], ignore_index=True)
+
+
+#     Block_Vol = BlockWidth * BlockHeight * BlockHeightZ
+
+#     mina_rellenada['value'] = np.where(
+#         mina_rellenada['cut']<ley_corte, 
+#         -cm*mina_rellenada['density']*Block_Vol, 
+#         (P-cr)*FTL*R*mina_rellenada['cut']*mina_rellenada['density']*Block_Vol - (cp+cm)*mina_rellenada['density']*Block_Vol)
+
+#     return mina_rellenada
+
 def relleno_mina(mina, default_density,
                  BlockWidth, BlockHeight, BlockHeightZ,
                  cm, cr, cp, P, FTL, R, ley_corte,
                  relleno_lateral=30):
-    mina_rellenada = mina.copy()
-    new_blocks = pd.DataFrame({
-        col: pd.Series(dtype=mina[col].dtype) for col in mina.columns
-    })
+    
+    mina_copy = mina.copy()
 
-    x_min = mina['x'].min()
-    x_max = mina['x'].max()
-    y_min = mina['y'].min()
-    y_max = mina['y'].max()
+    mina_copy['value'] = 0 
 
-    X_values = mina['x'].unique()
-    Y_values = mina['y'].unique()
+    x_min, x_max = mina['x'].min(), mina['x'].max()
+    y_min, y_max = mina['y'].min(), mina['y'].max()
+
+    X_values = set(mina['x'].unique())
+    Y_values = set(mina['y'].unique())
     Z_values = mina['z'].unique()
 
-    for i in range(1, relleno_lateral+1):
-        x_inf_new = x_min - i*BlockWidth
-        x_sup_new = x_max + i*BlockWidth
-        y_inf_new = y_min - i*BlockHeight
-        y_sup_new = y_max + i*BlockHeight
+    # Relleno lateral: agrega extremos
+    for i in range(1, relleno_lateral + 1):
+        X_values.update([x_min - i * BlockWidth, x_max + i * BlockWidth])
+        Y_values.update([y_min - i * BlockHeight, y_max + i * BlockHeight])
 
-        X_values = np.append(X_values, [x_inf_new, x_sup_new])
-        Y_values = np.append(Y_values, [y_inf_new, y_sup_new])
+    # Convertimos los sets a listas ordenadas
+    X_values = sorted(X_values)
+    Y_values = sorted(Y_values)
 
-    X_values = sorted(set(X_values))
-    Y_values = sorted(set(Y_values))
+    columns = list(mina_copy.columns)
+    Coords = list(product(X_values, Y_values, Z_values))
 
-    for x in X_values:
-        for y in Y_values:
-            in_mina = mina[(mina['x']==x) & (mina['y']==y)]
-            if in_mina.empty:
-                to_add = pd.DataFrame(data=0, columns=new_blocks.columns, index=range(len(Z_values)))
-                
-                to_add['x'] = [x]*len(Z_values)
-                to_add['y'] = [y]*len(Z_values)
-                to_add['z'] = Z_values
-
-                to_add['density'] = [default_density]*len(Z_values)
-
-                new_blocks = pd.concat([new_blocks, to_add], ignore_index=True)
-            else:
-                z_in_mina = in_mina['z'].unique()
-
-                z_to_add = list(set(Z_values) - set(z_in_mina))
-                z_max_loc = np.array(z_in_mina).max()
-
-                to_add = pd.DataFrame(data=0, columns=new_blocks.columns, index=range(len(z_to_add)))
-                to_add['x'] = [x]*len(z_to_add)
-                to_add['y'] = [y]*len(z_to_add)
-                to_add['z'] = z_to_add
-
-                to_add['density'] = np.where(to_add['z']<z_max_loc, default_density, 0)
-
-                new_blocks = pd.concat([new_blocks, to_add], ignore_index=True)
+    new_mina = pd.DataFrame(0, index=range(len(Coords)), columns=columns)
+    new_mina[['x','y','z']] = pd.DataFrame(Coords, columns=['x','y','z'])
+    new_mina['density'] = [default_density]*len(new_mina)
 
 
-    mina_rellenada = pd.concat([mina_rellenada, new_blocks], ignore_index=True)
+    min_z_por_xy = mina_copy.groupby(['x', 'y'])['z'].max().to_dict()
 
+    def calcular_density(row):
+        key = (row['x'], row['y'])
+        if key in min_z_por_xy and row['z'] < min_z_por_xy[key]:
+            return 0
+        else:
+            return default_density
+    def calcular_tipomineral(row):
+        key = (row['x'], row['y'])
+        if key in min_z_por_xy and row['z'] < min_z_por_xy[key]:
+            return -1
+        else:
+            return -2
+
+    new_mina['density'] = new_mina.apply(calcular_density, axis=1)
+    new_mina['tipomineral'] = new_mina.apply(calcular_tipomineral, axis=1)
+
+    claves = ['x','y','z']
+
+    mina_rellena = mina_copy.set_index(claves).combine_first(new_mina.set_index(claves)).reset_index()
+
+    claves_B = set(map(tuple, mina[claves].values))
+    mascara_solo_new_mina = ~mina_rellena[claves].apply(tuple, axis=1).isin(claves_B)
+
+    inicio_id = len(mina) + 1
+    mina_rellena.loc[mascara_solo_new_mina, 'id'] = range(inicio_id, inicio_id + mascara_solo_new_mina.sum())
+
+    mina_rellena['id'] = mina_rellena['id'].astype(int)
 
     Block_Vol = BlockWidth * BlockHeight * BlockHeightZ
 
-    mina_rellenada['value'] = np.where(
-        mina_rellenada['cut']<ley_corte, 
-        -cm*mina_rellenada['density']*Block_Vol, 
-        (P-cr)*FTL*R*mina_rellenada['cut']*mina_rellenada['density']*Block_Vol - (cp+cm)*mina_rellenada['density']*Block_Vol)
+    mina_rellena['value'] = np.where(
+        mina_rellena['cut']<ley_corte, 
+        -cm*mina_rellena['density']*Block_Vol, 
+        (P-cr)*FTL*R*mina_rellena['cut']*mina_rellena['density']*Block_Vol - (cp+cm)*mina_rellena['density']*Block_Vol)
 
-    return mina_rellenada
+        
+    return mina_rellena
+
+
+
 
 
 def isin_cone(mina_rellena, params_cono, Minimum_base_area=0, horizontal_tolerance=0):
@@ -1544,6 +1624,8 @@ def profit(mina_rellena, params_cono, Minimum_base_area=0, horizontal_tolerance=
 
     return points_in_cone['value'].sum()
 
+
+    
 
 
 
@@ -1608,6 +1690,65 @@ def Best_Cone_by_Volume(fase, max_global_angle=45):
     result = sp.optimize.minimize(objective, initial_guess, constraints=constraints, method='SLSQP')
 
     print(result)
+    return result
+
+def Best_Cone_by_Profit_sp_minimize(mina, max_global_angle=45, Minimum_base_area=0, method='L-BFGS-B', fd_step=1e-1, ftol=0.01):
+    x_c = mina['x'].mean()
+    y_c = mina['y'].mean()
+    z_c = mina['z'].max()
+    
+    a_low = (0.01)*(mina['x'].max() - mina['x'].min())
+    a_up = (0.75)*(mina['x'].max() - mina['x'].min())
+
+    b_low = (0.01)*(mina['y'].max() - mina['y'].min())
+    b_up = (0.75)*(mina['y'].max() - mina['y'].min())
+
+    h_low = (0.5)*(mina['z'].max() - mina['z'].min())
+    h_up = (2)*(mina['z'].max() - mina['z'].min())
+
+    lambda_x = 0.45
+    x_low = (1-lambda_x)*mina['x'].min() + (lambda_x)*mina['x'].max()
+    x_up = (lambda_x)*mina['x'].min() + (1-lambda_x)*mina['x'].max()
+
+    lambda_y = 0.45
+    y_low = (1-lambda_y)*mina['y'].min() + (lambda_y)*mina['y'].max()
+    y_up = (lambda_y)*mina['y'].min() + (1-lambda_y)*mina['y'].max()
+
+
+    a_guess = (0.5)*(mina['x'].max() - mina['x'].min())
+    b_guess = (0.5)*(mina['y'].max() - mina['y'].min())
+    x_guess = mina['x'].median()
+    y_guess = mina['y'].median()
+    h_guess = (0.75)*(mina['z'].max() - mina['z'].min())
+    alpha_guess = 0
+
+    x0 = [a_guess, b_guess, h_guess, x_guess, y_guess, alpha_guess]
+
+    def objective(params):
+        a, b, h, x_cone, y_cone, alpha = params
+        varepsilon = 1e-2
+        if np.arctan(h/a)*180/np.pi > max_global_angle:
+            return 1e20
+        if np.arctan(h/b)*180/np.pi > max_global_angle:
+            return 1e20
+        if (a <= 0) or (b <= 0) or (h <= 0):
+            return 1e20
+        return -profit(mina, params, Minimum_base_area=Minimum_base_area) + varepsilon*abs(x_cone-x_c)**2 + varepsilon*abs(y_cone-y_c)**2
+
+    bounds = [(a_low, a_up),
+              (b_low, b_up),
+              (h_low, h_up),
+              (x_low, x_up),
+              (y_low, y_up),
+              (-np.pi/2, np.pi/2)]
+
+    result = sp.optimize.minimize(objective, x0,
+                                  bounds=bounds,
+                                  method=method,
+                                  jac='3-point',
+                                  options={'disp': True, 'finite_diff_rel_step': fd_step, 'ftol': ftol})
+    
+
     return result
 
 
@@ -1743,63 +1884,63 @@ def make_objective(mina,
 
 
 
-def Rampa_old(fase, Cone=[], Angulo_Descenso=np.arcsin(0.10), theta_0=0, t_final=2*5*np.pi, n=1000, orientation=1):
-    if not Cone:
-        raise Exception('Debe adjuntar cono')
-    if orientation >= 0:
-        orientation = 1
-    else:
-        orientation = -1
+# def Rampa_old(fase, Cone=[], Angulo_Descenso=np.arcsin(0.10), theta_0=0, t_final=2*5*np.pi, n=1000, orientation=1):
+#     if not Cone:
+#         raise Exception('Debe adjuntar cono')
+#     if orientation >= 0:
+#         orientation = 1
+#     else:
+#         orientation = -1
 
 
-    z_c = fase['z'].max()
-    p = -np.sin(Angulo_Descenso)
-    a_opt, b_opt, h_opt, x_opt, y_opt, alpha_opt = Cone
+#     z_c = fase['z'].max()
+#     p = -np.sin(Angulo_Descenso)
+#     a_opt, b_opt, h_opt, x_opt, y_opt, alpha_opt = Cone
 
-    T = np.linspace(0, t_final, n)
-    X_curve = []
-    Y_curve = []
-    Z_curve = []
+#     T = np.linspace(0, t_final, n)
+#     X_curve = []
+#     Y_curve = []
+#     Z_curve = []
 
-    z = z_c
-    theta = theta_0
+#     z = z_c
+#     theta = theta_0
 
-    x = a_opt*np.cos(theta_0) + x_opt
-    y = b_opt*np.sin(theta_0) + y_opt
+#     x = a_opt*np.cos(theta_0) + x_opt
+#     y = b_opt*np.sin(theta_0) + y_opt
 
-    X_curve.append(x)
-    Y_curve.append(y)
-    Z_curve.append(z_c)
+#     X_curve.append(x)
+#     Y_curve.append(y)
+#     Z_curve.append(z_c)
 
-    for t in T:
-        if t == 0:
-            t0 = 0
-        else:
-            ra = (a_opt/h_opt)*(h_opt - z_c + z)
-            rb = (b_opt/h_opt)*(h_opt - z_c + z)
-            A = p**2 * (b_opt/h_opt)**2 * np.sin(theta) + p**2 * (b_opt/h_opt)**2 * np.cos(theta) + p**2 - 1
-            B = (2*p**2 * (b_opt/h_opt)*rb*np.sin(theta)*np.cos(theta) - 2*p**2 * (a_opt/h_opt)*ra*np.sin(theta)*np.cos(theta))
-            C = p**2 * rb**2 * np.cos(theta)**2 + p**2 * ra**2 * np.sin(theta)**2
+#     for t in T:
+#         if t == 0:
+#             t0 = 0
+#         else:
+#             ra = (a_opt/h_opt)*(h_opt - z_c + z)
+#             rb = (b_opt/h_opt)*(h_opt - z_c + z)
+#             A = p**2 * (b_opt/h_opt)**2 * np.sin(theta) + p**2 * (b_opt/h_opt)**2 * np.cos(theta) + p**2 - 1
+#             B = (2*p**2 * (b_opt/h_opt)*rb*np.sin(theta)*np.cos(theta) - 2*p**2 * (a_opt/h_opt)*ra*np.sin(theta)*np.cos(theta))
+#             C = p**2 * rb**2 * np.cos(theta)**2 + p**2 * ra**2 * np.sin(theta)**2
 
-            dz = ((-B) + np.sqrt( B**2 - 4*A*C ))/(2*A)
+#             dz = ((-B) + np.sqrt( B**2 - 4*A*C ))/(2*A)
 
-            theta_new = theta_0 + orientation*t
-            z_new = z + (t-t0)*dz
+#             theta_new = theta_0 + orientation*t
+#             z_new = z + (t-t0)*dz
 
-            x = (a_opt/h_opt)*(h_opt-z_c+z_new)*np.cos(theta_new) + x_opt
-            y = (b_opt/h_opt)*(h_opt-z_c+z_new)*np.sin(theta_new) + y_opt
+#             x = (a_opt/h_opt)*(h_opt-z_c+z_new)*np.cos(theta_new) + x_opt
+#             y = (b_opt/h_opt)*(h_opt-z_c+z_new)*np.sin(theta_new) + y_opt
 
-            X_curve.append(x)
-            Y_curve.append(y)
-            Z_curve.append(z)
+#             X_curve.append(x)
+#             Y_curve.append(y)
+#             Z_curve.append(z)
 
-            t0 = t
-            z = z_new
-            theta = theta_new
+#             t0 = t
+#             z = z_new
+#             theta = theta_new
 
-    return X_curve, Y_curve, Z_curve
+#     return X_curve, Y_curve, Z_curve
 
-def Rampa(fase, Cone=None, Angulo_Descenso=np.arcsin(0.10), theta_0=0, t_final=2*5*np.pi, n=1000, orientation=1):
+def Rampa(fase, Cone=None, Angulo_Descenso=np.arcsin(0.10), theta_0=0, n=1000, orientation=1, z_min=None, max_vueltas=5):
     if Cone is None or len(Cone)==0:
         raise Exception('Debe adjuntar cono')
     if orientation >= 0:
@@ -1807,6 +1948,8 @@ def Rampa(fase, Cone=None, Angulo_Descenso=np.arcsin(0.10), theta_0=0, t_final=2
     else:
         orientation = -1
     
+    t_final=2*max_vueltas*np.pi
+
     z_c = fase['z'].max()
     p = -np.sin(Angulo_Descenso)
     a, b, h, x_cone, y_cone, alpha_cone = Cone
@@ -1826,6 +1969,8 @@ def Rampa(fase, Cone=None, Angulo_Descenso=np.arcsin(0.10), theta_0=0, t_final=2
     Y_curve.append(y)
     Z_curve.append(z)
     
+    stop = False
+
     for t in T:
         if t == 0:
             t0 = 0
@@ -1855,11 +2000,23 @@ def Rampa(fase, Cone=None, Angulo_Descenso=np.arcsin(0.10), theta_0=0, t_final=2
             z = z_new
             theta = theta_new
 
+            if stop:
+                break
+
+            if z_min:
+                if z_new < z_min:
+                    stop = True
+            
+
     return X_curve, Y_curve, Z_curve
 
-def Puntos_Iniciales(fase, rampa):
+def Puntos_Iniciales(mina, rampa, z_min=None, debug=False):
     X_curve, Y_curve, Z_curve = rampa
-    alturas = fase['z'].unique()
+    if not z_min:
+        z_min = mina['z'].min()
+    alturas = mina['z'].unique()
+    alturas = sorted(alturas[alturas>=z_min])
+    
     positions = []
     for h in alturas:
         counter = 0
@@ -1869,6 +2026,10 @@ def Puntos_Iniciales(fase, rampa):
                 break
             counter+=1
 
+    if debug:
+        print(alturas)
+        print(positions)
+
     puntos_iniciales = []
     counter = 0
     for c in positions:
@@ -1877,3 +2038,197 @@ def Puntos_Iniciales(fase, rampa):
     
     return puntos_iniciales
 
+
+def Z_min(mina, cono, Minimum_Area=1e6, debug=False):
+    a, b, h, x_c, y_c, alpha = cono
+    Z_values = sorted(mina['z'].unique())
+    z_c = mina['z'].max()
+
+    z_min = z_c
+    for z in Z_values:
+        z_rel = (h-z_c+z)/h
+        A = a*z_rel
+        B = b*z_rel
+        if debug:
+            print((z, np.pi*A*B))
+        if np.pi*A*B >= Minimum_Area:
+            z_min = z
+            break
+
+    return z_min
+
+
+def isin_rampa(mina_rellena, rampa, ancho_rampa):
+    id_bloques_in_rampa = set()
+    X_curve, Y_curve, Z_curve = rampa
+    alturas = np.array(sorted(mina_rellena['z'].unique()))
+
+    for c in range(len(Z_curve)):
+        x, y, z = (X_curve[c], Y_curve[c], Z_curve[c])
+        z_in_mina = np.abs((alturas - z)).argmin()
+        z_in_mina = alturas[z_in_mina]
+
+        mask = ((mina_rellena['x']-x)**2 + (mina_rellena['y']-y)**2 <= (ancho_rampa/2)**2) & (mina_rellena['z']==z_in_mina)
+
+        id_bloques_in_rampa.update(list(mina_rellena[mask]['id'].unique()))
+    
+    return list(id_bloques_in_rampa)
+
+def block_precedence(mina_rellena, block_coords,
+                     BlockWidth, BlockHeight, BlockHeightZ,
+                     config='5-points'):
+    if (not config=='5-points') or (not config=='9-points'):
+        print('Solo use congif=5-points o config=9-points')
+        return None
+    x, y, z = block_coords
+    precedences = []
+    if z == mina_rellena['z'].max():
+        return precedences
+    
+    if config=='5-points':
+        offsets = [
+            (0, 0),                     # Centro arriba
+            (0, BlockHeight),           # Norte
+            (0, -BlockHeight),          # Sur
+            (BlockWidth, 0),            # Este
+            (-BlockWidth, 0),           # Oeste
+        ]
+    elif config=='9-points':
+        offsets = [
+            (0, 0),                     # Centro arriba
+            (0, BlockHeight),           # Norte
+            (0, -BlockHeight),          # Sur
+            (BlockWidth, 0),            # Este
+            (-BlockWidth, 0),           # Oeste
+            (BlockWidth, BlockHeight),  # Noreste
+            (-BlockWidth, BlockHeight), # Noroeste
+            (-BlockWidth, -BlockHeight),# Suroeste
+            (BlockWidth, -BlockHeight), # Sureste
+        ]
+
+    z_p = z + BlockHeightZ
+    vecinos = pd.DataFrame([
+        {'x': x + dx, 'y': y + dy, 'z': z_p}
+        for dx, dy in offsets
+    ])
+
+    coincidencias = vecinos.merge(mina_rellena[['x', 'y', 'z', 'id']],
+                                    on=['x', 'y', 'z'], how='inner')
+
+    precedences = coincidencias['id'].tolist()
+
+    return precedences
+        
+def expand_all_precedences(mina_rellena, block_coords,
+                           BlockWidth, BlockHeight, BlockHeightZ,
+                           config='5-points'):
+    if (not config=='5-points') or (not config=='9-points'):
+        print('Solo use congif=5-points o config=9-points')
+        return None
+
+    visited = set()
+    queue = [block_coords]
+    all_precedences = set()
+
+    while queue:
+        current = queue.pop(0)
+        if current in visited:
+            continue
+        visited.add(current)
+
+        prec_ids = block_precedence(
+            mina_rellena, current,
+            BlockWidth, BlockHeight, BlockHeightZ,
+            config=config
+        )
+
+        # Buscar coordenadas correspondientes a estos IDs
+        prec_coords_df = mina_rellena[mina_rellena['id'].isin(prec_ids)][['x', 'y', 'z']]
+        new_coords = [tuple(row) for row in prec_coords_df.to_numpy()]
+
+        # Agregamos los IDs nuevos
+        all_precedences.update(prec_ids)
+
+        # Añadimos los nuevos bloques a la cola si no han sido visitados
+        for coord in new_coords:
+            if coord not in visited:
+                queue.append(coord)
+
+    return list(all_precedences)
+
+
+# def total_additional_blocks(mina_rellena, rampa, z_min,
+#                             ancho_rampa):
+#     id_in_rampa = isin_rampa(mina_rellena, rampa, ancho_rampa)
+
+def expand_group_precedences(mina_rellena, block_coords_list,
+                              BlockWidth, BlockHeight, BlockHeightZ,
+                              config='5-points'):
+    if (not config=='5-points') or (not config=='9-points'):
+        print('Solo use congif=5-points o config=9-points')
+        return None
+
+    visited_coords = set()
+    # Convertir todos los elementos de entrada a tuplas
+    queue = [tuple(coord) for coord in block_coords_list]
+    all_precedences = set()
+
+    while queue:
+        current = queue.pop(0)
+        if current in visited_coords:
+            continue
+        visited_coords.add(current)
+
+        prec_ids = block_precedence(
+            mina_rellena, current,
+            BlockWidth, BlockHeight, BlockHeightZ,
+            config=config
+        )
+
+        all_precedences.update(prec_ids)
+
+        prec_coords_df = mina_rellena[mina_rellena['id'].isin(prec_ids)][['x', 'y', 'z']]
+        new_coords = [tuple(row) for row in prec_coords_df.to_numpy()]
+
+        for coord in new_coords:
+            if coord not in visited_coords:
+                queue.append(coord)
+
+    return list(all_precedences)
+
+def all_precedences(mina_rellena, block_coords,
+                           BlockWidth, BlockHeight, BlockHeightZ,
+                           config='5-points', angulo_apertura=45):
+    if (not config=='5-points') and (not config=='9-points'):
+        print('Solo use config=5-points o config=9-points')
+        return None
+
+    angulo_apertura = angulo_apertura*np.pi/180
+
+    all_precedences = set()
+    block_coords = [tuple(coord) for coord in block_coords]
+    alturas = mina_rellena['z'].unique()
+    
+
+    for block in block_coords:
+        x_b, y_b, z_b = block
+        alturas_up_block = sorted(alturas[alturas>=z_b])
+        new_ids = set()
+
+        dx = (mina_rellena['x']-x_b)/BlockWidth
+        dy = (mina_rellena['y']-y_b)/BlockHeight
+        if config=='5-points':
+            dist = np.abs(dx) + np.abs(dy)
+        elif config=='9-points':
+            dist = np.maximum(np.abs(dx), np.abs(dy))
+
+        counter = 0
+        rel = 0.5
+        for z in alturas_up_block:
+            rel = ((z - z_b)/BlockHeightZ)*np.arctan(angulo_apertura)
+            mask = (dist <= rel) & (mina_rellena['z']==z)
+            new_ids.update(list(mina_rellena[mask]['id']))
+            # counter+=1
+        all_precedences.update(new_ids)
+    
+    return all_precedences
