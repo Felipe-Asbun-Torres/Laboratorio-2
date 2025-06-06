@@ -373,13 +373,17 @@ def plot_fase_banco(
         BlockWidth=10, BlockHeight=10,
         xsize = 10, ysize = 10, cmap='plasma', show_block_label=True, show_grid=True, dpi = 100,
         highlight_blocks=[], points=[], arrows=[], sectors=[], precedences={}, centers={}, elipse=[],
-        save_as_image=False, path_to_save=''
+        save_as_image=False, path_to_save='', show_legend=True
         ):
     if FaseBanco.empty:
         print("El DataFrame 'FaseBanco' está vacío. No se puede graficar.")
         return
     if not text_hue:
         text_hue = column_hue
+    
+    xsize=int(xsize)
+    ysize=int(ysize)
+    dpi=float(dpi)
 
     fig, ax = plt.subplots(figsize=(xsize, ysize), dpi=dpi)
     norm = None
@@ -435,11 +439,11 @@ def plot_fase_banco(
 
     x_min = FaseBanco['x'].min() - 5*BlockWidth
     x_max = FaseBanco['x'].max() + 5*BlockHeight
-    # ax.set_xlim(x_min, x_max)
+    ax.set_xlim(x_min, x_max)
 
     y_min = FaseBanco['y'].min() - 5*BlockHeight
     y_max = FaseBanco['y'].max() + 5*BlockHeight
-    # ax.set_ylim(y_min, y_max)
+    ax.set_ylim(y_min, y_max)
 
     ax.set_aspect('equal', adjustable='box')
     ax.set_xlabel('X')
@@ -488,14 +492,16 @@ def plot_fase_banco(
 
         ax.plot(X_elipse, Y_elipse, color='black')
 
-    if is_continuous:
-        sm = plt.cm.ScalarMappable(cmap=colormap, norm=norm)
-        sm.set_array([])
-        cbar = fig.colorbar(sm, ax=ax, shrink=0.8, aspect=20)
-        cbar.set_label(column_hue, rotation=270, labelpad=15)
-    else:
-        legend_patches = [patches.Patch(color=color, label=str(value)) for value, color in color_map_discrete.items()]
-        ax.legend(handles=legend_patches, title=column_hue, loc='upper right', fontsize=8, title_fontsize=10)
+    if show_legend:
+        if is_continuous:
+            sm = plt.cm.ScalarMappable(cmap=colormap, norm=norm)
+            sm.set_array([])
+            cbar = fig.colorbar(sm, ax=ax, shrink=0.8, aspect=20)
+            cbar.set_label(column_hue, rotation=270, labelpad=15)
+        else:
+            legend_patches = [patches.Patch(color=color, label=str(value)) for value, color in color_map_discrete.items()]
+            ax.legend(handles=legend_patches, title=column_hue, loc='upper right', fontsize=8, title_fontsize=10)
+    
     plt.tight_layout()
 
     if save_as_image:
@@ -598,6 +604,86 @@ def Calculate_Adjency_Matrix(FaseBanco,
 
     else:
         return adjency_matrix
+
+
+'''
+Calcula la similaridad entre los bloques de la fase-banco, de acuerdo a distancia, ley, destino, tipo de roca 
+y/o dirección de minería.
+Para no usar un criterio, basta con asignar el valor 0 en el peso o penalización correspondiente.
+Devuelve una matriz densa.
+'''
+def Calculate_Similarity_Matrix(
+        FaseBanco, 
+        peso_distancia = 2, 
+        peso_ley = 0, 
+        penalizacion_destino = 0.9, 
+        penalizacion_roca = 0.9,
+        peso_directional_mining = 0.25,
+        tol_ley = 0.01,
+        tol_directional_mining = 0.001,
+        P_inicio = (-1,-1),
+        P_final = (1,1)
+        ):
+
+    n = len(FaseBanco)
+
+    similarity_matrix = np.zeros((n, n), dtype=float)
+
+    x = FaseBanco['x'].values
+    y = FaseBanco['y'].values
+
+    # Distancia
+    X1 = matlib.repmat(x.reshape(len(x),1), 1, len(x))
+    X2 = X1.T
+    Y1 = matlib.repmat(y.reshape(len(y),1), 1, len(y))
+    Y2 = Y1.T
+
+    D = np.sqrt((X1 - X2)**2 + (Y1 - Y2)**2)
+
+    ND = D / np.max(D)
+
+    # Ley
+    g = FaseBanco['cut'].values
+    G1 = matlib.repmat(g.reshape(len(g),1), 1, len(g))
+    G2 = G1.T
+
+    G = np.maximum(np.abs(G1 - G2), tol_ley)
+
+    NG = G / np.max(G)
+
+    # Destino
+    t = FaseBanco['destino'].values
+    T1 = matlib.repmat(t.reshape(len(t),1), 1, len(t))
+    T2 = T1.T
+    T = T1 != T2
+
+    T = np.ones((n,n)) - (1-penalizacion_destino)*T*np.ones((n,n))
+
+    # Tipo Roca/Material
+    if 'tipomineral' in FaseBanco.columns:
+        rock = FaseBanco['tipomineral'].values
+        R1 = matlib.repmat(rock.reshape(len(rock),1), 1, len(rock))
+        R2 = R1.T
+        R = R1 != R2
+
+        R = np.ones((n,n)) - (1-penalizacion_roca)*R*np.ones((n,n))
+    else:
+        R = 1
+
+    # Dirección de minería
+    M1 = (X1 - P_inicio[0])**2 + (Y1 - P_inicio[1])**2
+    M2 = (X1 - P_final[0])**2 + (Y1 - P_final[1])**2
+    Mi = np.multiply( np.sign( M1 - M2 ), np.sqrt( np.abs(M1 - M2 )) )
+    DM = np.maximum(np.abs(Mi - Mi.T), tol_directional_mining)
+
+    NDM = DM / np.max(DM)
+
+    numerator = np.multiply(R,T)
+    denominator = np.multiply(ND**peso_distancia, NG**peso_ley)
+    denominator = np.multiply(denominator, NDM**peso_directional_mining)
+    similarity_matrix = np.divide(numerator,  denominator, where=np.ones((n,n)) - np.diag(np.ones(n))==1)
+
+    return similarity_matrix
 
 
 '''
@@ -721,7 +807,7 @@ def Clustering_Tabesh(
 
 '''
 Encuentra los bloques esquinas de la fase-banco. Utiliza el criterio de Tabesh (2013) para definir los bloques esquinas.
-Devuelve un diccionario cuyas llaves son los bloques esquina y cuyos valores son los clusters con los que es vecino.
+Devuelve un diccionario cuyas llaves son el id de los bloques esquina y cuyos valores son los clusters con los que es vecino.
 Sólo se utiliza en Shape_Refinement_Tabesh.
 '''
 def Find_Corner_Blocks_Tabesh(FaseBanco, AdjencyMatrix):
@@ -743,9 +829,10 @@ def Find_Corner_Blocks_Tabesh(FaseBanco, AdjencyMatrix):
                 Clusters_Vecinos.append(FaseBanco.iloc[cols[j]]['cluster'].astype(int))
         
         if (Mismo_Cluster <= 1 and Distinto_Cluster > 1 and (len(np.unique(Clusters_Vecinos)) < len(Clusters_Vecinos))):
-            corner_blocks.update({i: np.sort(Clusters_Vecinos)})
+            corner_blocks.update({FaseBanco.iloc[i]['id']: np.sort(Clusters_Vecinos)})
 
     return corner_blocks
+
 
 '''
 Refina la forma de los clusters de la fase-banco utilizando el criterio de Tabesh (2013).
@@ -755,15 +842,15 @@ Devuelve el DataFrame de la fase-banco.
 def Shape_Refinement_Tabesh(FaseBanco, AdjencyMatrix, Min_Cluster_Length = 10, Iterations_PostProcessing=5, Reset_Clusters_Index=False):
     fase_banco = FaseBanco.copy()
     execution_time = 0
-    ID_Small_Clusters = fase_banco['cluster'].value_counts().loc[fase_banco['cluster'].value_counts() < Min_Cluster_Length].index.tolist()
+    ID_Small_Clusters = list(fase_banco['cluster'].value_counts().loc[fase_banco['cluster'].value_counts() < Min_Cluster_Length].index)
     max_i_cluster = fase_banco['cluster'].max() + 1
     t1 = time.time()
 
     for i in ID_Small_Clusters:
-        blocks = fase_banco.loc[fase_banco['cluster'] == i, 'cluster'].index
+        blocks = list(fase_banco.loc[fase_banco['cluster'] == i, 'id'])
 
         for j in blocks:
-            fase_banco.loc[j, 'cluster'] = max_i_cluster
+            fase_banco.loc[fase_banco['id']==j, 'cluster'] = max_i_cluster
             max_i_cluster += 1
 
     for iterations in range(Iterations_PostProcessing):
@@ -776,8 +863,12 @@ def Shape_Refinement_Tabesh(FaseBanco, AdjencyMatrix, Min_Cluster_Length = 10, I
             if len(Corner_Blocks[i]) == 2:
                 Cluster_to_insert = Corner_Blocks[i][0]
             else:
-                Cluster_to_insert = np.unique_counts(Corner_Blocks[i]).values[np.unique_counts(Corner_Blocks[i]).counts.argmax()]
-            fase_banco.loc[i, 'cluster'] = Cluster_to_insert
+                # Cluster_to_insert = np.unique(array, return_counts=True)
+                # Cluster_to_insert = np.unique_counts(Corner_Blocks[i]).values[np.unique_counts(Corner_Blocks[i]).counts.argmax()]
+                vals, counts = np.unique(Corner_Blocks[i], return_counts=True)
+                Cluster_to_insert = vals[np.argmax(counts)]
+
+            fase_banco.loc[fase_banco['id']==i, 'cluster'] = Cluster_to_insert
 
     t2 = time.time()
     execution_time = t2-t1
@@ -792,52 +883,6 @@ def Shape_Refinement_Tabesh(FaseBanco, AdjencyMatrix, Min_Cluster_Length = 10, I
 
     return fase_banco, execution_time, N_Clusters
 
-
-'''
-Refina la forma de los clusters de la fase-banco, utilizando el criterio de Tabesh (2013).
-Depende de la función Find_Corner_Blocks_Tabesh.
-Devuelve el DataFrame de la fase-banco.
-'''
-def Shape_Refinement_Tabesh(FaseBanco, AdjencyMatrix, Min_Cluster_Length = 10, Iterations_PostProcessing=5, Reset_Clusters_Index=False):
-    fase_banco = FaseBanco.copy()
-    execution_time = 0
-    ID_Small_Clusters = fase_banco['cluster'].value_counts().loc[fase_banco['cluster'].value_counts() < Min_Cluster_Length].index.tolist()
-    max_i_cluster = fase_banco['cluster'].max() + 1
-    t1 = time.time()
-
-    for i in ID_Small_Clusters:
-        blocks = fase_banco.loc[fase_banco['cluster'] == i, 'cluster'].index
-
-        for j in blocks:
-            fase_banco.loc[j, 'cluster'] = max_i_cluster
-            max_i_cluster += 1
-
-    for iterations in range(Iterations_PostProcessing):
-        Corner_Blocks = Find_Corner_Blocks_Tabesh(fase_banco, AdjencyMatrix)
-
-        if len(Corner_Blocks) == 0:
-            break
-
-        for i in Corner_Blocks.keys():
-            if len(Corner_Blocks[i]) == 2:
-                Cluster_to_insert = Corner_Blocks[i][0]
-            else:
-                Cluster_to_insert = np.unique_counts(Corner_Blocks[i]).values[np.unique_counts(Corner_Blocks[i]).counts.argmax()]
-
-            fase_banco.loc[i, 'cluster'] = Cluster_to_insert
-
-    t2 = time.time()
-    execution_time = t2-t1
-    N_Clusters = len(fase_banco['cluster'].unique())
-
-    if Reset_Clusters_Index:
-        fase_banco['cluster'] = fase_banco['cluster'].map(lambda x: np.array(range(1,N_Clusters+1))[np.where(fase_banco['cluster'].unique() == x)[0][0]] if x in fase_banco['cluster'].unique() else x)
-
-    print(f"========PostProcessing Results========")
-    print(f"Total de clusters: {N_Clusters}")
-    print(f'Tiempo: {execution_time}')
-
-    return fase_banco, execution_time, N_Clusters
 
 
 '''
@@ -847,9 +892,7 @@ A diferencia del refinamiento de Tabesh, el cual trabaja por etapas, este refina
 secuencial, lo que lo hace depender del orden de refinado.
 '''
 def Shape_Refinement_Mod(FaseBanco, AdjencyMatrix, Min_Cluster_Length = 10, Iterations_PostProcessing=5, Reset_Clusters_Index=False):
-    
-
-    fase_banco = FaseBanco.copy()
+    fase_banco = FaseBanco.copy().reset_index()
     execution_time = 0
     ID_Small_Clusters = fase_banco['cluster'].value_counts().loc[fase_banco['cluster'].value_counts() < Min_Cluster_Length].index.tolist()
     max_i_cluster = fase_banco['cluster'].max() + 1
@@ -884,7 +927,9 @@ def Shape_Refinement_Mod(FaseBanco, AdjencyMatrix, Min_Cluster_Length = 10, Iter
                 if Mismo_Cluster <=1:
                     # Criterio Tabesh
                     if (Distinto_Cluster >= 2) and len(np.unique(Clusters_Vecinos)) < len(Clusters_Vecinos):
-                        Cluster_to_insert = np.unique_counts(Clusters_Vecinos).values[np.unique_counts(Clusters_Vecinos).counts.argmax()]
+                        vals, counts = np.unique(Clusters_Vecinos, return_counts=True)
+                        Cluster_to_insert = vals[np.argmax(counts)]
+                        # Cluster_to_insert = np.unique_counts(Clusters_Vecinos).values[np.unique_counts(Clusters_Vecinos).counts.argmax()]
                         fase_banco.loc[b, 'cluster'] = Cluster_to_insert
 
                     # Criterio Modificado. Considera los casos en que el bloque tiene 3 vecinos de distintos clusters o sólo 1 vecino de otro cluster.
@@ -911,6 +956,9 @@ def Shape_Refinement_Mod(FaseBanco, AdjencyMatrix, Min_Cluster_Length = 10, Iter
     print(f"Total de clusters: {N_Clusters}")
     print(f'Tiempo: {execution_time}')
     
+    fase_banco = fase_banco.set_index('index')
+    fase_banco.index.name = None
+
     return fase_banco, execution_time, N_Clusters
 
 ######################################################
@@ -1006,15 +1054,17 @@ def Coefficient_Variation(FaseBanco):
 Calcula los clusters vecinos al cluster especificado.
 '''
 def Clusters_Vecinos(FaseBanco, Cluster, AdjencyMatrix):
-    Blocks = FaseBanco.loc[FaseBanco['cluster'] == Cluster].index
+    fase_banco = FaseBanco.copy().reset_index()
+
+    Blocks = fase_banco.loc[fase_banco['cluster'] == Cluster].index
     rows, cols = AdjencyMatrix.nonzero()
     Clusters_Vecinos = []
 
     for b in Blocks:
             b_is_row = np.where(rows == b)[0]
             for j in b_is_row:
-                if FaseBanco.iloc[b]['cluster'] != FaseBanco.iloc[cols[j]]['cluster']:
-                    Clusters_Vecinos.append(FaseBanco.iloc[cols[j]]['cluster'].astype(int))
+                if fase_banco.iloc[b]['cluster'] != fase_banco.iloc[cols[j]]['cluster']:
+                    Clusters_Vecinos.append(fase_banco.iloc[cols[j]]['cluster'].astype(int))
 
     return Clusters_Vecinos
 
@@ -1136,14 +1186,9 @@ def Precedencias_Clusters_Angle(FaseBanco, P_inicio, P_final,
     fase_banco = FaseBanco.copy()
     ID_Clusters = fase_banco['cluster'].unique()
     Num_Clusters = len(ID_Clusters)
-    Centers = {}
-    t1 = time.time()
-    # Cálculo de centros de los clusters
-    for id in ID_Clusters:
-        Cluster = fase_banco.loc[fase_banco['cluster']==id]
-        P_center = (Cluster['x'].mean(), Cluster['y'].mean())
-        Centers[id] = P_center
     
+    t1 = time.time()
+    Centers = Centros_Clusters(FaseBanco)
     distancias_al_inicio = {}
     Dic_Precedencias = {}
     adjency_matrix = Calculate_Adjency_Matrix(fase_banco, BlockWidth, BlockHeight)
@@ -1314,7 +1359,7 @@ def relleno_mina(mina, default_density,
     mina_rellena['value'] = np.where(
         mina_rellena['cut']<ley_corte, 
         -cm*mina_rellena['density']*Block_Vol, 
-        (P-cr)*FTL*R*mina_rellena['cut']*mina_rellena['density']*Block_Vol - (cp+cm)*mina_rellena['density']*Block_Vol)
+        (P-cr)*FTL*R*(mina_rellena['cut']/100.0)*mina_rellena['density']*Block_Vol - (cp+cm)*mina_rellena['density']*Block_Vol)
 
     return mina_rellena
 
@@ -1375,9 +1420,9 @@ def isin_cone(mina_rellena, params_cono,
 Calcula el beneficio esperado (sin tiempo) del cono especificado
 '''
 def profit(mina_rellena, params_cono, 
-           Minimum_base_area=0, horizontal_tolerance=0):
+           Minimum_Area=0, horizontal_tolerance=0):
     points_in_cone = mina_rellena[isin_cone(mina_rellena, params_cono, 
-                                            Minimum_base_area=Minimum_base_area, 
+                                            Minimum_Area=Minimum_Area, 
                                             horizontal_tolerance=horizontal_tolerance)]
 
     return points_in_cone['value'].sum()
@@ -1447,7 +1492,7 @@ Busca el mejor cono que se ajusta a la mina maximizando profit utilizando gradie
 Este cono no necesariamente contiene a toda la mina.
 '''
 def Best_Cone_by_Profit_sp_minimize(mina, mina_rellena, max_global_angle=45, 
-                                    Minimum_base_area=0, 
+                                    Minimum_Area=0, 
                                     method='L-BFGS-B', fd_step=1e-1, ftol=0.01):
     x_c = mina['x'].mean()
     y_c = mina['y'].mean()
@@ -1480,6 +1525,7 @@ def Best_Cone_by_Profit_sp_minimize(mina, mina_rellena, max_global_angle=45,
 
     x0 = [a_guess, b_guess, h_guess, x_guess, y_guess, alpha_guess]
 
+    print(x0)
     def objective(params):
         a, b, h, x_cone, y_cone, alpha = params
         varepsilon = 1e-2
@@ -1489,7 +1535,7 @@ def Best_Cone_by_Profit_sp_minimize(mina, mina_rellena, max_global_angle=45,
             return 1e20
         if (a <= 0) or (b <= 0) or (h <= 0):
             return 1e20
-        return -profit(mina_rellena, params, Minimum_base_area=Minimum_base_area) + varepsilon*abs(x_cone-x_c)**2 + varepsilon*abs(y_cone-y_c)**2
+        return -profit(mina_rellena, params, Minimum_Area=Minimum_Area) + varepsilon*abs(x_cone-x_c)**2 + varepsilon*abs(y_cone-y_c)**2
 
     bounds = [(a_low, a_up),
               (b_low, b_up),
@@ -1503,6 +1549,55 @@ def Best_Cone_by_Profit_sp_minimize(mina, mina_rellena, max_global_angle=45,
                                   method=method,
                                   jac='3-point',
                                   options={'disp': True, 'finite_diff_rel_step': fd_step, 'ftol': ftol})
+
+    return result
+
+def Best_Cone_by_Profit_diff_evol(mina, mina_rellena, max_global_angle=45, Minimum_Area=0, maxiter=1000, popsize=15, polish=True, init='latinhypercube', strategy='best1bin', mutation=(0.5, 1), recombination=0.7, rng=None, workers=1):
+    
+    x_c = mina['x'].mean()
+    y_c = mina['y'].mean()
+    z_c = mina['z'].max()
+
+    a_low = (0.25)*(mina['x'].max() - mina['x'].min())
+    a_up = (2)*(mina['x'].max() - mina['x'].min())
+
+    b_low = (0.25)*(mina['y'].max() - mina['y'].min())
+    b_up = (2)*(mina['y'].max() - mina['y'].min())
+
+    h_low = (1/3)*(mina['z'].max() - mina['z'].min())
+    h_up = (2)*(mina['z'].max() - mina['z'].min())
+
+    lambda_x = 0.4
+    x_low = (1-lambda_x)*mina['x'].min() + (lambda_x)*mina['x'].max()
+    x_up = (lambda_x)*mina['x'].min() + (1-lambda_x)*mina['x'].max()
+
+    lambda_y = 0.4
+    y_low = (1-lambda_y)*mina['y'].min() + (lambda_y)*mina['y'].max()
+    y_up = (lambda_y)*mina['y'].min() + (1-lambda_y)*mina['y'].max()
+
+    a_guess = (0.75)*(mina['x'].max() - mina['x'].min())
+    b_guess = (0.75)*(mina['y'].max() - mina['y'].min())
+    x_guess = mina['x'].median()
+    y_guess = mina['y'].median()
+    h_guess = (1)*(mina['z'].max() - mina['z'].min())
+    alpha_guess = 0
+
+    x0 = [a_guess, b_guess, h_guess, x_guess, y_guess, alpha_guess]
+
+    def objective(params):
+        a, b, h, x_cone, y_cone, alpha = params
+        varepsilon = 1e-2
+        if np.arctan(h/a)*180/np.pi > max_global_angle:
+            return 1e20
+        if np.arctan(h/b)*180/np.pi > max_global_angle:
+            return 1e20
+        if (a <= 0) or (b <= 0) or (h <= 0):
+            return 1e20
+        return -profit(mina_rellena, params, Minimum_Area=Minimum_Area) + varepsilon*abs(x_cone-x_c)**2 + varepsilon*abs(y_cone-y_c)**2
+    
+    bounds = [(a_low, a_up), (b_low, b_up), (h_low, h_up), (x_low, x_up), (y_low, y_up), (-np.pi/2, np.pi/2)]
+
+    result = sp.optimize.differential_evolution(objective, bounds, maxiter=maxiter, popsize=popsize, polish=polish, disp=True, workers=workers, init=init, strategy=strategy, mutation=mutation, recombination=recombination, rng=rng, x0=x0)
 
     return result
 
@@ -1581,7 +1676,7 @@ def Rampa(fase, cono=None, descenso=0.10, theta_0=0, n=1000, orientation=1, z_mi
 
             theta_new = theta_0 + orientation*t
             z_new = z + (t-t0)*dz
-
+            print(z_new)
             x = (a*np.cos(theta_new)*np.cos(alpha_cone) - b*np.sin(theta_new)*np.sin(alpha_cone))*(1-z_c/h+z_new/h) + x_cone
             y = (a*np.cos(theta_new)*np.sin(alpha_cone) + b*np.sin(theta_new)*np.cos(alpha_cone))*(1-z_c/h+z_new/h) + y_cone
 
