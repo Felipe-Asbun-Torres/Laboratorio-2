@@ -27,7 +27,7 @@ Formato de datos:
 # puntos = [ (x1, y1, z1), (x2, y2, z2), ... ]
 # curva = [ (x1, x2, x3, ...), (y1, y2, y3, ...), (z1, z2, z3, ...) ]
 # elipses = [ (a1, b1, x1_c, y1_c, alpha1, z1_c), (a2, b2, x2_c, y2_c, alpha2, z2_c), ... ]
-# cono = [(a, b, h, x_centro, y_centro, alpha, z_sup), ...]
+# cono = [(a, b, h, alpha, x_centro, y_centro, , z_sup), ...]
 '''
 def plot_mina_3D(mina, column_hue='tipomineral', params=dict()):
     fig = go.Figure()
@@ -84,7 +84,7 @@ def plot_mina_3D(mina, column_hue='tipomineral', params=dict()):
     Theta = np.linspace(0, 2*np.pi, 50)
     i = 1
     for elipse in elipses:
-        a, b, x_centro, y_centro, alpha, z_centro = elipse
+        a, b, x_centro, alpha, y_centro, z_centro = elipse
         X_elipse = a*np.cos(Theta)*np.cos(alpha) - b*np.sin(Theta)*np.sin(alpha) + x_centro
         Y_elipse = a*np.cos(Theta)*np.sin(alpha) + b*np.sin(Theta)*np.cos(alpha) + y_centro
         Z_elipse = np.full_like(Theta, z_centro)
@@ -119,7 +119,7 @@ def plot_mina_3D(mina, column_hue='tipomineral', params=dict()):
         #     cono_indices.append((1, len(fig.data)-1))
         # else:
         i = 1
-        for a, b, h, x_centro, y_centro, alpha, z_sup in cono:
+        for a, b, h, alpha, x_centro, y_centro, z_sup in cono:
             Z = np.linspace(z_sup - h, z_sup, 50)
             Theta, Z = np.meshgrid(Theta, Z)
             X_cono = ((a/h)*np.cos(Theta)*np.cos(alpha) - (b/h)*np.sin(Theta)*np.sin(alpha))*(h-z_sup+Z) + x_centro
@@ -527,7 +527,7 @@ def plot_fase_banco(FaseBanco, column_hue='cut', text_hue=None, params=dict()):
     params.setdefault('show_grid', True)
     params.setdefault('show_legend', True)
     params.setdefault('dpi', 100)
-    params.setdefault('destacar_bloques', [])
+    params.setdefault('destacar_bloques', set())
     params.setdefault('puntos', [])
     params.setdefault('flechas', [])
     params.setdefault('sectores', [])
@@ -1585,15 +1585,11 @@ Identifica los puntos de la mina rellena que están dentro del cono especificado
 Minimum_Area es el área mínima inferior de la mina necesario para operar. En caso de que Minimum_Area>0, no se cuentan los bloques que están en elipses del cono que violan esta restricción.
 horizontal_tolerance es un parámetro de tolerancia horizontal de bloques, de modo que se expanden las elipses del cono en horizontal_tolerance metros.
 '''
-def isin_cone(mina_rellena, params_cono, 
-              Minimum_Area=0, horizontal_tolerance=0):
-    a, b, h, x_cone, y_cone, alpha = params_cono
-    z_c = mina_rellena['z'].max()
+def isin_cone(mina_rellena, params_cono, Minimum_Area=0):
+    a, b, h, alpha, x_cone, y_cone, z_c  = params_cono
+    # z_c = mina_rellena['z'].max()
 
     index_mina_rellena = mina_rellena.index
-
-    a += horizontal_tolerance
-    b += horizontal_tolerance
 
     M = np.array([[1/a**2, 0],
                         [0, 1/b**2]])
@@ -1675,18 +1671,17 @@ def Best_Cone_by_Volume(mina, max_global_angle=45):
     alpha_guess = 0
 
     def objective(params):
-        a, b, h, x_cone, y_cone, alpha = params
+        a, b, h, alpha, x_cone, y_cone, z_cone = params
         varepsilon = 1e-2
         if (a <= 0) or (b <= 0) or (h <= 0):
             return 1e20
         return (1/3)*np.pi*a*b*h + varepsilon*abs(x_cone-x_c)**2 + varepsilon*abs(y_cone-y_c)**2
     
     def constrainst_gen(point):
-        z_c = mina['z'].max()
         def constraint(params):
-            a, b, h, x_cone, y_cone, alpha = params
-            A = (a/h)*(h-z_c+point[2])
-            B = (b/h)*(h-z_c+point[2])
+            a, b, h, alpha, x_cone, y_cone, z_cone = params
+            A = (a/h)*(h-z_cone+point[2])
+            B = (b/h)*(h-z_cone+point[2])
             if A < 0:
                 A = 1e-12
             if B < 0:
@@ -1710,11 +1705,14 @@ def Best_Cone_by_Volume(mina, max_global_angle=45):
     bounds = [(None, None),
           (None, None),
           (None, None),
+          (-np.pi/2, np.pi/2),
           (None, None),
           (None, None),
-          (-np.pi/2, np.pi/2)]
+          (z_c, z_c)
+    ]
+    
 
-    initial_guess = (a_guess, b_guess, h_guess, x_guess, y_guess, alpha_guess)
+    initial_guess = (a_guess, b_guess, h_guess, alpha_guess, x_guess, y_guess, z_c)
     result = sp.optimize.minimize(objective, initial_guess, bounds=bounds,constraints=constraints, method='SLSQP', options={'ftol':1e-9})
 
     print(result)
@@ -1759,11 +1757,11 @@ def Best_Cone_by_Profit_sp_minimize(mina, mina_rellena, max_global_angle=45,
     alpha_guess = 0
 
     if len(x0)==0:
-        x0 = [a_guess, b_guess, h_guess, x_guess, y_guess, alpha_guess]
+        x0 = [a_guess, b_guess, h_guess, alpha_guess, x_guess, y_guess, z_c]
 
     print(x0)
     def objective(params):
-        a, b, h, x_cone, y_cone, alpha = params
+        a, b, h, alpha, x_cone, y_cone, z_cone = params
         varepsilon = 1e-2
         if np.arctan(h/a)*180/np.pi > max_global_angle:
             return 1e20
@@ -1776,9 +1774,11 @@ def Best_Cone_by_Profit_sp_minimize(mina, mina_rellena, max_global_angle=45,
     bounds = [(a_low, a_up),
               (b_low, b_up),
               (h_low, h_up),
+              (-np.pi/2, np.pi/2),
               (x_low, x_up),
               (y_low, y_up),
-              (-np.pi/2, np.pi/2)]
+              (z_c, z_c)
+              ]
 
     result = sp.optimize.minimize(objective, x0,
                                   bounds=bounds,
@@ -1820,10 +1820,10 @@ def Best_Cone_by_Profit_diff_evol(mina, mina_rellena, max_global_angle=45, Minim
     alpha_guess = 0
 
     if len(x0)==0:
-        x0 = [a_guess, b_guess, h_guess, x_guess, y_guess, alpha_guess]
+        x0 = [a_guess, b_guess, h_guess, alpha_guess, x_guess, y_guess, z_c]
 
     def objective(params):
-        a, b, h, x_cone, y_cone, alpha = params
+        a, b, h, alpha, x_cone, y_cone, z_cone = params
         varepsilon = 1e-2
         if np.arctan(h/a)*180/np.pi > max_global_angle:
             return 1e20
@@ -1833,7 +1833,14 @@ def Best_Cone_by_Profit_diff_evol(mina, mina_rellena, max_global_angle=45, Minim
             return 1e20
         return -profit(mina_rellena, params, Minimum_Area=Minimum_Area) + varepsilon*abs(x_cone-x_c)**2 + varepsilon*abs(y_cone-y_c)**2
     
-    bounds = [(a_low, a_up), (b_low, b_up), (h_low, h_up), (x_low, x_up), (y_low, y_up), (-np.pi/2, np.pi/2)]
+    bounds = [(a_low, a_up),
+              (b_low, b_up),
+              (h_low, h_up),
+              (-np.pi/2, np.pi/2),
+              (x_low, x_up),
+              (y_low, y_up),
+              (z_c, z_c)
+              ]
 
     result = sp.optimize.differential_evolution(objective, bounds, maxiter=maxiter, popsize=popsize, disp=True, init=init, strategy=strategy, mutation=mutation, recombination=recombination, x0=x0)
 
@@ -1845,7 +1852,7 @@ def Best_Cone_by_Profit_diff_evol(mina, mina_rellena, max_global_angle=45, Minim
 Identificación de altura mínima de la mina de acuerdo a un criterio de área mínima.
 '''
 def Z_min(mina, cono, Minimum_Area=1e6, debug=False):
-    a, b, h, x_c, y_c, alpha, z_c = cono
+    a, b, h, alpha, x_c, y_c, z_c = cono
     Z_values = sorted(mina['z'].unique())
     # z_c = mina['z'].max()
 
@@ -1863,85 +1870,85 @@ def Z_min(mina, cono, Minimum_Area=1e6, debug=False):
     return z_min
 
 
-def Rampa(cono, params_rampa, z_min=None, n=300, max_vueltas=3):
-    if cono is None or len(cono)==0:
-        raise Exception('Debe adjuntar cono')
+# def Rampa(cono, params_rampa, z_min=None, n=300, max_vueltas=3):
+#     if cono is None or len(cono)==0:
+#         raise Exception('Debe adjuntar cono')
     
-    theta_0, descenso, orientacion, z_switchback = params_rampa
+#     theta_0, descenso, orientacion, z_switchback = params_rampa
 
-    if orientacion >= 0:
-        orientacion = 1
-    else:
-        orientacion = -1
+#     if orientacion >= 0:
+#         orientacion = 1
+#     else:
+#         orientacion = -1
 
-    Angulo_Descenso = np.arcsin(descenso)
-    t_final=2*max_vueltas*np.pi
+#     Angulo_Descenso = np.arcsin(descenso)
+#     t_final=2*max_vueltas*np.pi
 
-    p = -np.sin(Angulo_Descenso)
-    a, b, h, x_cone, y_cone, alpha_cone, z_c = cono
+#     p = -np.sin(Angulo_Descenso)
+#     a, b, h, x_cone, y_cone, alpha_cone, z_c = cono
 
-    T = np.linspace(0, t_final, n)
-    X_curve = []
-    Y_curve = []
-    Z_curve = []
+#     T = np.linspace(0, t_final, n)
+#     X_curve = []
+#     Y_curve = []
+#     Z_curve = []
 
-    z = z_c
-    theta = theta_0
+#     z = z_c
+#     theta = theta_0
 
-    x = (a*np.cos(theta_0)*np.cos(alpha_cone) - b*np.sin(theta_0)*np.sin(alpha_cone)) + x_cone
-    y = (a*np.cos(theta_0)*np.sin(alpha_cone) + b*np.sin(theta_0)*np.cos(alpha_cone)) + y_cone
+#     x = (a*np.cos(theta_0)*np.cos(alpha_cone) - b*np.sin(theta_0)*np.sin(alpha_cone)) + x_cone
+#     y = (a*np.cos(theta_0)*np.sin(alpha_cone) + b*np.sin(theta_0)*np.cos(alpha_cone)) + y_cone
 
-    X_curve.append(x)
-    Y_curve.append(y)
-    Z_curve.append(z)
+#     X_curve.append(x)
+#     Y_curve.append(y)
+#     Z_curve.append(z)
     
-    stop = False
+#     stop = False
 
-    for t in T:
-        if t == 0:
-            t0 = 0
-        else:
-            R_1 = a*np.cos(theta)*np.cos(alpha_cone) - b*np.sin(theta)*np.sin(alpha_cone)
-            dR_1 = (-a*np.sin(theta)*np.cos(alpha_cone) - b*np.cos(theta)*np.sin(alpha_cone))*orientacion
-            R_2 = a*np.cos(theta)*np.sin(alpha_cone) + b*np.sin(theta)*np.cos(alpha_cone)
-            dR_2 = (-a*np.sin(theta)*np.sin(alpha_cone) + b*np.cos(theta)*np.cos(alpha_cone))*orientacion
+#     for t in T:
+#         if t == 0:
+#             t0 = 0
+#         else:
+#             R_1 = a*np.cos(theta)*np.cos(alpha_cone) - b*np.sin(theta)*np.sin(alpha_cone)
+#             dR_1 = (-a*np.sin(theta)*np.cos(alpha_cone) - b*np.cos(theta)*np.sin(alpha_cone))*orientacion
+#             R_2 = a*np.cos(theta)*np.sin(alpha_cone) + b*np.sin(theta)*np.cos(alpha_cone)
+#             dR_2 = (-a*np.sin(theta)*np.sin(alpha_cone) + b*np.cos(theta)*np.cos(alpha_cone))*orientacion
 
-            A = p**2 - 1 + p**2 * R_1**2/h**2 + p**2 * R_2**2/h**2
-            B = (2*p**2/h)*(R_1*dR_1 + R_2*dR_2)*(1-z_c/h + z/h)
-            C = p**2*(dR_1**2 + dR_2**2)*(1 - z_c/h + z/h)**2
+#             A = p**2 - 1 + p**2 * R_1**2/h**2 + p**2 * R_2**2/h**2
+#             B = (2*p**2/h)*(R_1*dR_1 + R_2*dR_2)*(1-z_c/h + z/h)
+#             C = p**2*(dR_1**2 + dR_2**2)*(1 - z_c/h + z/h)**2
 
-            dz = ((-B) + np.sqrt( B**2 - 4*A*C ))/(2*A)
+#             dz = ((-B) + np.sqrt( B**2 - 4*A*C ))/(2*A)
 
-            z_new = z + (t-t0)*dz
-            theta_new = theta_0 + orientacion*t
+#             z_new = z + (t-t0)*dz
+#             theta_new = theta_0 + orientacion*t
             
 
-            x = (a*np.cos(theta_new)*np.cos(alpha_cone) - b*np.sin(theta_new)*np.sin(alpha_cone))*(1-z_c/h+z_new/h) + x_cone
-            y = (a*np.cos(theta_new)*np.sin(alpha_cone) + b*np.sin(theta_new)*np.cos(alpha_cone))*(1-z_c/h+z_new/h) + y_cone
+#             x = (a*np.cos(theta_new)*np.cos(alpha_cone) - b*np.sin(theta_new)*np.sin(alpha_cone))*(1-z_c/h+z_new/h) + x_cone
+#             y = (a*np.cos(theta_new)*np.sin(alpha_cone) + b*np.sin(theta_new)*np.cos(alpha_cone))*(1-z_c/h+z_new/h) + y_cone
 
-            X_curve.append(x)
-            Y_curve.append(y)
-            Z_curve.append(z_new)
+#             X_curve.append(x)
+#             Y_curve.append(y)
+#             Z_curve.append(z_new)
 
-            t0 = t
-            z = z_new
-            theta = theta_new
+#             t0 = t
+#             z = z_new
+#             theta = theta_new
 
-            if stop:
-                break
+#             if stop:
+#                 break
 
-            if z_min:
-                if z_new < z_min:
-                    stop = True
+#             if z_min:
+#                 if z_new < z_min:
+#                     stop = True
             
-    return X_curve, Y_curve, Z_curve
+#     return X_curve, Y_curve, Z_curve
 
 
 
 '''
 Creación de rampa embebida en el cono con cierta pendiente de descenso y ángulo inicial.
 '''
-def Rampa_switchback(cono, params_rampa, n=300, max_vueltas=3, ancho_rampa=0, z_min=None):
+def Rampa(cono, params_rampa, n=300, max_vueltas=3, ancho_rampa=0, z_min=None):
     theta_0, descenso, orientacion, z_switchback = params_rampa
 
     if orientacion >= 0:
@@ -1953,7 +1960,7 @@ def Rampa_switchback(cono, params_rampa, n=300, max_vueltas=3, ancho_rampa=0, z_
     t_final = 2*max_vueltas*np.pi
 
     p = -np.sin(Angulo_Descenso)
-    a, b, h, x_cone, y_cone, alpha_cone, z_c = cono
+    a, b, h, alpha_cone, x_cone, y_cone, z_c = cono
 
     if z_switchback:
         a += 2*ancho_rampa
@@ -2029,7 +2036,7 @@ def Rampa_switchback(cono, params_rampa, n=300, max_vueltas=3, ancho_rampa=0, z_
 
                     z_switchback = None
                     
-                    cono_sw = [a*(1-z_c/h+z_new/h), b*(1-z_c/h+z_new/h), h-(z_c-z_new), x_cone, y_cone, alpha_cone, z_new]
+                    cono_sw = [a*(1-z_c/h+z_new/h), b*(1-z_c/h+z_new/h), h-(z_c-z_new), alpha_cone, x_cone, y_cone, z_new]
                     params_rampa_sw = [theta_new, descenso, orientacion, None]
 
                     X, Y, Z = Rampa(cono_sw, params_rampa_sw, n=300, z_min=z_min, max_vueltas=3)
@@ -2065,6 +2072,7 @@ Identifica los id de los bloques que cruzan la rampa, incluyendo precedencias ho
 '''
 def isin_rampa(mina, mina_rellena, rampa, cono, BlockHeightZ,
             ancho_rampa, ord=np.inf):
+    
     id_bloques_in_rampa = set()
 
     X_curve, Y_curve, Z_curve = rampa
@@ -2073,7 +2081,7 @@ def isin_rampa(mina, mina_rellena, rampa, cono, BlockHeightZ,
     Z_curve = np.array(Z_curve) + BlockHeightZ/2
     alturas = np.array(sorted(mina_rellena['z'].unique()))
 
-    a, b, h, x_c, y_c, alpha, z_c = cono
+    a, b, h, alpha, x_c, y_c, z_c = cono
     center = np.array([x_c, y_c])
 
     x_all = mina_rellena['x'].values
@@ -2110,17 +2118,30 @@ def isin_rampa(mina, mina_rellena, rampa, cono, BlockHeightZ,
     
     id_mina = set(mina['id'])
 
-    return (id_bloques_in_rampa - id_mina)
+    in_rampa = (id_bloques_in_rampa - id_mina)
+    return in_rampa
 
 
 
-def total_additional_blocks(mina_rellena, blocks_id,
-                            BlockWidth, BlockHeight, BlockHeightZ,
-                            config='5-points', angulo_apertura_up=20,
-                            angulo_apertura_down=20):
+def total_additional_blocks(mina_rellena, blocks_id, params=dict()):
     
+    params.setdefault('BlockWidth', 10)
+    params.setdefault('BlockHeight', 10)
+    params.setdefault('BlockHeightZ', 16)
+    params.setdefault('config', '9-points')
+    params.setdefault('angulo_apertura_up', 20)
+    params.setdefault('angulo_apertura_down', 20)
+
+    BlockWidth = params['BlockWidth']
+    BlockHeight = params['BlockHeight']
+    BlockHeightZ = params['BlockHeightZ']
+    config = params['config']
+    angulo_apertura_up = params['angulo_apertura_up']
+    angulo_apertura_down = params['angulo_apertura_down']
+
     if config not in ('5-points', '9-points'):
         raise ValueError('Solo use config=5-points o config=9-points')
+
 
     angulo_apertura_up_rad = np.radians(angulo_apertura_up)
     angulo_apertura_down_rad = np.radians(angulo_apertura_down)
@@ -2164,7 +2185,7 @@ def total_additional_blocks(mina_rellena, blocks_id,
 
 def Best_Ramp_sp(mina, mina_rellena, params_cono, min_area,
                 ancho_rampa, x0=[],
-                ref_rampa=500, angulo_apertura_up=20, angulo_apertura_down=20, config='9-points',
+                ref_rampa=300, angulo_apertura_up=20, angulo_apertura_down=20, config='9-points',
                 BlockWidth=10, BlockHeight=10, BlockHeightZ=16,
                 method='L-BFGS-B'):
 
@@ -2175,9 +2196,8 @@ def Best_Ramp_sp(mina, mina_rellena, params_cono, min_area,
         x0 = [0, 0.1, 0.5]
 
     def objective(params):
-        theta, descenso, orientation = params
-        rampa = Rampa(mina, cono=list(params_cono), z_min=z_min, descenso=descenso,
-                      theta_0=np.radians(theta), orientation=orientation, n=ref_rampa)
+        theta, descenso, orientation, z_switchback = params
+        rampa = Rampa(params_cono, params, n=ref_rampa, ancho_rampa=ancho_rampa, z_min=z_min)
 
         id_in_rampa = isin_rampa(mina, mina_rellena, cono=params_cono, BlockHeightZ=BlockHeightZ, rampa=rampa, ancho_rampa=ancho_rampa, ord=np.inf)
 
@@ -2207,9 +2227,8 @@ def Best_Ramp_diff_evol(mina, mina_rellena, params_cono, min_area, ancho_rampa, 
     bounds = [(-np.pi, np.pi), (0, 0.15), (-1, 1)]
 
     def objective(params):
-        theta, descenso, orientation = params
-        rampa = Rampa(mina, cono=list(params_cono), z_min=z_min, descenso=descenso,
-                      theta_0=np.radians(theta), orientation=orientation, n=ref_rampa)
+        theta, descenso, orientation, z_switchback = params
+        rampa = Rampa(params_cono, params, n=ref_rampa, ancho_rampa=ancho_rampa, z_min=z_min)
 
         id_in_rampa = isin_rampa(mina, mina_rellena, cono=params_cono, BlockHeightZ=BlockHeightZ, rampa=rampa, ancho_rampa=ancho_rampa, ord=np.inf)
 
@@ -2229,57 +2248,78 @@ def Best_Ramp_diff_evol(mina, mina_rellena, params_cono, min_area, ancho_rampa, 
     return result
 
 
-def Best_Ramp_gp(mina, mina_rellena, params_cono, min_area, ancho_rampa, x0=[],
-                 ref_rampa=500, angulo_apertura_up=20, angulo_apertura_down=20, config='9-points',
-                 BlockWidth=10, BlockHeight=10, BlockHeightZ=16, n_calls=50, random_state=42):
+# def Best_Ramp_gp(mina, mina_rellena, params_cono, min_area, ancho_rampa, x0=[],
+#                  ref_rampa=500, angulo_apertura_up=20, angulo_apertura_down=20, config='9-points',
+#                  BlockWidth=10, BlockHeight=10, BlockHeightZ=16, n_calls=50, random_state=42):
 
-    z_min = Z_min(mina, params_cono, Minimum_Area=min_area)
+#     z_min = Z_min(mina, params_cono, Minimum_Area=min_area)
 
-    space = [
-        Real(-np.pi, np.pi, name='theta'),
-        Real(0.05, 0.15, name='descenso'),
-        Real(-1, 1, name='orientation')
-    ]
+#     space = [
+#         Real(-np.pi, np.pi, name='theta'),
+#         Real(0.05, 0.15, name='descenso'),
+#         Real(-1, 1, name='orientation')
+#     ]
 
-    def objective(params):
-        theta, descenso, orientation = params
-        rampa = Rampa(mina, cono=list(params_cono), z_min=z_min, descenso=descenso,
-                      theta_0=np.radians(theta), orientation=orientation, n=ref_rampa)
+#     def objective(params):
+#         theta, descenso, orientation, z_switchback = params
+#         rampa = Rampa(params_cono, params, n=ref_rampa, ancho_rampa=ancho_rampa, z_min=z_min)
 
-        id_in_rampa = isin_rampa(mina, mina_rellena, cono=params_cono, BlockHeightZ=BlockHeightZ, rampa=rampa, ancho_rampa=ancho_rampa, ord=np.inf)
+#         id_in_rampa = isin_rampa(mina, mina_rellena, cono=params_cono, BlockHeightZ=BlockHeightZ, rampa=rampa, ancho_rampa=ancho_rampa, ord=np.inf)
 
-        all_precedences, all_support = total_additional_blocks(mina_rellena, id_in_rampa,
-                                                  BlockWidth, BlockHeight, BlockHeightZ,
-                                                  config=config, angulo_apertura_up=angulo_apertura_up,
-                                                  angulo_apertura_down=angulo_apertura_down)
+#         all_precedences, all_support = total_additional_blocks(mina_rellena, id_in_rampa,
+#                                                   BlockWidth, BlockHeight, BlockHeightZ,
+#                                                   config=config, angulo_apertura_up=angulo_apertura_up,
+#                                                   angulo_apertura_down=angulo_apertura_down)
 
-        total_ids = (set(mina['id']) | all_precedences) - all_support
-        mina_con_rampa = mina_rellena[mina_rellena['id'].isin(total_ids)]
+#         total_ids = (set(mina['id']) | all_precedences) - all_support
+#         mina_con_rampa = mina_rellena[mina_rellena['id'].isin(total_ids)]
 
-        return -mina_con_rampa['value'].sum()
+#         return -mina_con_rampa['value'].sum()
 
-    result = gp_minimize(
-        func=objective,
-        dimensions=space,
-        n_calls=n_calls,
-        x0=x0 if x0 else None,
-        random_state=random_state,
-        verbose=True
-    )
+#     result = gp_minimize(
+#         func=objective,
+#         dimensions=space,
+#         n_calls=n_calls,
+#         x0=x0 if x0 else None,
+#         random_state=random_state,
+#         verbose=True
+#     )
 
-    print("Mejor solución encontrada:")
-    print("θ (rad):", result.x[0])
-    print("Descenso:", result.x[1])
-    print("Orientación:", result.x[2])
-    print("Valor objetivo (negativo):", result.fun)
+#     print("Mejor solución encontrada:")
+#     print("θ (rad):", result.x[0])
+#     print("Descenso:", result.x[1])
+#     print("Orientación:", result.x[2])
+#     print("Valor objetivo (negativo):", result.fun)
 
-    return result
-
+#     return result
 
 
-def Best_Ramp_gp_switchback(mina, mina_rellena, params_cono, min_area, ancho_rampa, x0=[],
-                 ref_rampa=500, angulo_apertura_up=20, angulo_apertura_down=20, config='9-points',
-                 BlockWidth=10, BlockHeight=10, BlockHeightZ=16, n_calls=50, random_state=42):
+
+def Best_Ramp_gp(mina, mina_rellena, params_cono, min_area, ancho_rampa, options=dict()):
+
+    options.setdefault('x0', [])
+    options.setdefault('ref_rampa', 300)
+    options.setdefault('angulo_apertura_up', 20)
+    options.setdefault('angulo_apertura_down', 20)
+    options.setdefault('config', '9-points')
+    options.setdefault('BlockWidth', 10)
+    options.setdefault('BlockHeight', 10)
+    options.setdefault('BlockHeightZ', 16)
+    options.setdefault('n_calls', 50)
+    options.setdefault('random_state', 73)
+
+    x0 = options['x0']
+    ref_rampa = options['ref_rampa']
+    angulo_apertura_up = options['angulo_apertura_up']
+    angulo_apertura_down = options['angulo_apertura_down']
+    config = options['config']
+    BlockWidth = options['BlockWidth']
+    BlockHeight = options['BlockHeight']
+    BlockHeightZ = options['BlockHeightZ']
+    n_calls = options['n_calls']
+    random_state = options['random_state']
+
+
 
     z_min = Z_min(mina, params_cono, Minimum_Area=min_area)
     z_max = mina['z'].max()
@@ -2299,7 +2339,7 @@ def Best_Ramp_gp_switchback(mina, mina_rellena, params_cono, min_area, ancho_ram
         z_switchback = None if switchback_mode == 'none' else z_switchback
         params_rampa = (params[0], params[1], params[2], z_switchback)
 
-        rampa = Rampa_switchback(params_cono, params_rampa, n=ref_rampa, ancho_rampa=ancho_rampa, z_min=z_min)
+        rampa = Rampa(params_cono, params_rampa, n=ref_rampa, ancho_rampa=ancho_rampa, z_min=z_min)
 
         id_in_rampa = isin_rampa(mina, mina_rellena, cono=params_cono, BlockHeightZ=BlockHeightZ, rampa=rampa, ancho_rampa=ancho_rampa, ord=np.inf)
 
