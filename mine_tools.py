@@ -11,6 +11,8 @@ import plotly.graph_objects as go
 
 from skopt.utils import use_named_args
 from skopt.space import Real
+from skopt.space import Categorical
+from skopt import gp_minimize
 from itertools import product
 from functools import partial
 
@@ -27,35 +29,59 @@ Formato de datos:
 # elipses = [ (a1, b1, x1_c, y1_c, alpha1, z1_c), (a2, b2, x2_c, y2_c, alpha2, z2_c), ... ]
 # cono = [(a, b, h, x_centro, y_centro, alpha, z_sup), ...]
 '''
-def plot_mina_3D(mina, column_hue='cluster', 
-                 puntos=[], curva=[], elipses=[], cono=[], id_bloques={}, mina_rellena=pd.DataFrame(),
-                 opacity_blocks=1, z_ratio=1, width=900, height=800):
+def plot_mina_3D(mina, column_hue='tipomineral', params=dict()):
     fig = go.Figure()
 
-    fig.add_trace(go.Scatter3d(
-        x=mina['x'],
-        y=mina['y'],
-        z=mina['z'],
-        mode='markers',
-        marker=dict(
-            size=5,
-            color=mina[column_hue],
-            colorscale='rainbow',
-            colorbar=dict(title=column_hue,
-                          x=1.15,
-                          y=0.5,
-                          len=0.75),
-            opacity=opacity_blocks
-        ),
-        hovertemplate=(
-            "ID: %{customdata[0]}<br>" +
-            f"{column_hue}:"+"%{marker.color:.3f}<br>"
-        ),
-        customdata=mina[['id', column_hue]],
-        name='Bloques'
-    ))
+    params.setdefault('puntos', [])
+    params.setdefault('curvas', [])
+    params.setdefault('elipses', [])
+    params.setdefault('conos', [])
+    params.setdefault('id_bloques', set())
+    params.setdefault('mina_rellena', pd.DataFrame())
+    params.setdefault('opacity_blocks', 1)
+    params.setdefault('z_ratio', 1)
+    params.setdefault('width', 900)
+    params.setdefault('height', 800)
 
-    Theta = np.linspace(0, 2*np.pi, 100)
+    puntos = params['puntos']
+    curva = params['curvas']
+    elipses = params['elipses']
+    cono = params['conos']
+    id_bloques = params['id_bloques']
+    mina_rellena = params['mina_rellena']
+    opacity_blocks = params['opacity_blocks']
+    z_ratio = params['z_ratio']
+    width = params['width']
+    height = params['height']
+    
+
+    fases_mina = sorted(mina['fase'].unique())
+    for f in fases_mina:
+        mini_mina = mina[mina['fase']==f]
+        fig.add_trace(go.Scatter3d(
+            x=mini_mina['x'],
+            y=mini_mina['y'],
+            z=mini_mina['z'],
+            mode='markers',
+            marker=dict(
+                size=5,
+                color=mini_mina[column_hue],
+                colorscale='rainbow',
+                colorbar=dict(title=column_hue,
+                            x=1.15,
+                            y=0.5,
+                            len=0.75),
+                opacity=opacity_blocks
+            ),
+            hovertemplate=(
+                "ID: %{customdata[0]}<br>" +
+                f"{column_hue}:"+"%{marker.color:.3f}<br>"
+            ),
+            customdata=mini_mina[['id', column_hue]],
+            name=f'Bloques fase {f}'
+        ))
+
+    Theta = np.linspace(0, 2*np.pi, 50)
     i = 1
     for elipse in elipses:
         a, b, x_centro, y_centro, alpha, z_centro = elipse
@@ -74,9 +100,27 @@ def plot_mina_3D(mina, column_hue='cluster',
     colors = ['Viridis', 'Turbo', 'Hot', 'Ice', 'Plasma', 'Agsunset', 'Mint', 'Emrld']
     if len(cono)>0:
         cono_indices = []
-        if isinstance(cono, tuple) and len(cono)==7:
-            a, b, h, x_centro, y_centro, alpha, z_sup = cono
-            Z = np.linspace(z_sup - h, z_sup, 100)
+        # if isinstance(cono, tuple) and len(cono)==7:
+        #     a, b, h, x_centro, y_centro, alpha, z_sup = cono
+        #     Z = np.linspace(z_sup - h, z_sup, 50)
+        #     Theta, Z = np.meshgrid(Theta, Z)
+        #     X_cono = ((a/h)*np.cos(Theta)*np.cos(alpha) - (b/h)*np.sin(Theta)*np.sin(alpha))*(h-z_sup+Z) + x_centro
+        #     Y_cono = ((a/h)*np.cos(Theta)*np.sin(alpha) + (b/h)*np.sin(Theta)*np.cos(alpha))*(h-z_sup+Z) + y_centro
+            
+        #     fig.add_trace(go.Surface(
+        #         x=X_cono,
+        #         y=Y_cono,
+        #         z=Z,
+        #         colorscale='viridis',
+        #         name='Cono',
+        #         opacity=0.8,
+        #         showscale=False
+        #     ))
+        #     cono_indices.append((1, len(fig.data)-1))
+        # else:
+        i = 1
+        for a, b, h, x_centro, y_centro, alpha, z_sup in cono:
+            Z = np.linspace(z_sup - h, z_sup, 50)
             Theta, Z = np.meshgrid(Theta, Z)
             X_cono = ((a/h)*np.cos(Theta)*np.cos(alpha) - (b/h)*np.sin(Theta)*np.sin(alpha))*(h-z_sup+Z) + x_centro
             Y_cono = ((a/h)*np.cos(Theta)*np.sin(alpha) + (b/h)*np.sin(Theta)*np.cos(alpha))*(h-z_sup+Z) + y_centro
@@ -85,50 +129,34 @@ def plot_mina_3D(mina, column_hue='cluster',
                 x=X_cono,
                 y=Y_cono,
                 z=Z,
-                colorscale='viridis',
-                name='Cono',
+                colorscale=colors[(i - 1) % len(colors)],
+                name=f'Cono {i}',
                 opacity=0.8,
                 showscale=False
             ))
-            cono_indices.append((1, len(fig.data)-1))
-        else:
-            i = 1
-            for a, b, h, x_centro, y_centro, alpha, z_sup in cono:
-                Z = np.linspace(z_sup - h, z_sup, 100)
-                Theta, Z = np.meshgrid(Theta, Z)
-                X_cono = ((a/h)*np.cos(Theta)*np.cos(alpha) - (b/h)*np.sin(Theta)*np.sin(alpha))*(h-z_sup+Z) + x_centro
-                Y_cono = ((a/h)*np.cos(Theta)*np.sin(alpha) + (b/h)*np.sin(Theta)*np.cos(alpha))*(h-z_sup+Z) + y_centro
-                
-                fig.add_trace(go.Surface(
-                    x=X_cono,
-                    y=Y_cono,
-                    z=Z,
-                    colorscale=colors[(i - 1) % len(colors)],
-                    name=f'Cono {i}',
-                    opacity=0.8,
-                    showscale=False
-                ))
-                cono_indices.append((i, len(fig.data)-1))
-                i+=1
+            cono_indices.append((i, len(fig.data)-1))
+            i+=1
 
     if len(curva)>0:
-        if isinstance(curva, list) and len(curva)==3:
-            X_curve, Y_curve, Z_curve = curva
+        colors = ['black', 'red', 'green', 'blue']
+        # if isinstance(curva, list) and len(curva)==3:
+        #     X_curve, Y_curve, Z_curve = curva
+        #     fig.add_trace(go.Scatter3d(
+        #         x=X_curve, y=Y_curve, z=Z_curve,
+        #         mode='lines',
+        #         line=dict(color='black', width=5),
+        #         name='Rampa'
+        #     ))
+        # else:
+        i=1
+        for X_curve, Y_curve, Z_curve in curva:
             fig.add_trace(go.Scatter3d(
                 x=X_curve, y=Y_curve, z=Z_curve,
                 mode='lines',
-                line=dict(color='black', width=5),
-                name='Rampa'
+                line=dict(color=colors[(i-1)%len(colors)], width=5),
+                name=f'Rampa {i}'
             ))
-        else:
-            i=1
-            for X_curve, Y_curve, Z_curve in curva:
-                fig.add_trace(go.Scatter3d(
-                    x=X_curve, y=Y_curve, z=Z_curve,
-                    mode='lines',
-                    line=dict(color='black', width=5),
-                    name=f'Rampa {i}'
-                ))
+            i+=1
     
     if len(puntos)>0:
         X = [p[0] for p in puntos]
@@ -153,8 +181,25 @@ def plot_mina_3D(mina, column_hue='cluster',
                 mode='markers',
                 marker=dict(color='red', size=1),
                 name='Bloques destacados',
-                opacity=opacity_blocks**(1/2)
+                opacity=opacity_blocks**(1/2),
+                hovertemplate=(
+                "ID: %{customdata[0]}<br>"
+            ),
+            customdata=mina['id'],
             ))
+        else:
+            bloques = mina[mina['id'].isin(id_bloques)]
+            if not bloques.empty:
+                X = list(bloques['x'])
+                Y = list(bloques['y'])
+                Z = list(bloques['z'])
+                fig.add_trace(go.Scatter3d(
+                    x=X, y=Y, z=Z,
+                    mode='markers',
+                    marker=dict(color='red', size=1),
+                    name='Bloques destacados',
+                    opacity=opacity_blocks**(1/2)
+                ))
 
     x_all = mina['x']
     y_all = mina['y']
@@ -184,31 +229,9 @@ def plot_mina_3D(mina, column_hue='cluster',
         height=height
     )
 
-    # fig.update_layout(
-    #     updatemenus=[dict(
-    #         type="dropdown",
-    #         direction="down",
-    #         showactive=True,
-    #         x=1.15,
-    #         y=1.15,
-    #         buttons=list([
-    #             dict(label='Mostrar todo',
-    #                 method='update',
-    #                 args=[{'visible': [True]*len(fig.data)}]),
-    #             dict(label='Ocultar cono',
-    #                 method='update',
-    #                 args=[{'visible': [
-    #                     False if trace.name == 'Cono' else True
-    #                     for trace in fig.data
-    #                 ]}]),
-    #         ])
-    #     )]
-    # )
-
     
     buttons = []
     if len(cono)>0:
-        
         # Mostrar todo
         buttons.append(dict(
             label='Mostrar todo',
@@ -247,13 +270,14 @@ def plot_mina_3D(mina, column_hue='cluster',
             type="dropdown",
             direction="down",
             showactive=True,
-            x=1.15,
+            x=0.15,
             y=1,
             xanchor='left',
             yanchor='top',
             buttons=buttons
         )]
     )
+
     fig.show()
 
 
@@ -490,16 +514,48 @@ Formato de datos:
 # elipse = [ (a1, b1, x1_centro, y1_centro, alpha1), (a2, b2, x2_centro, y2_centro, alpha2), ... ]
 # save_as_image: True si, en vez de mostrar el gráfico, se guarde en un archivo .png. Requiere de un path_file entregado por path_to_save.
 '''
-def plot_fase_banco(
-        FaseBanco, column_hue='cut', text_hue=None,
-        BlockWidth=10, BlockHeight=10,
-        xsize = 10, ysize = 10, cmap='plasma', show_block_label=True, show_grid=True, dpi = 100,
-        highlight_blocks=[], points=[], arrows=[], sectors=[], precedences={}, centers={}, elipse=[],
-        save_as_image=False, path_to_save='', show_legend=True
-        ):
+def plot_fase_banco(FaseBanco, column_hue='cut', text_hue=None, params=dict()):
     if FaseBanco.empty:
-        print("El DataFrame 'FaseBanco' está vacío. No se puede graficar.")
-        return
+        raise ValueError("El DataFrame 'FaseBanco' está vacío. No se puede graficar.")
+
+    params.setdefault('BlockWidth', 10)
+    params.setdefault('BlockHeight', 10)
+    params.setdefault('xsize', 10)
+    params.setdefault('ysize', 10)
+    params.setdefault('cmap', 'plasma')
+    params.setdefault('show_block_label', True)
+    params.setdefault('show_grid', True)
+    params.setdefault('show_legend', True)
+    params.setdefault('dpi', 100)
+    params.setdefault('destacar_bloques', [])
+    params.setdefault('puntos', [])
+    params.setdefault('flechas', [])
+    params.setdefault('sectores', [])
+    params.setdefault('precedencias', dict())
+    params.setdefault('centros', dict())
+    params.setdefault('elipse', [])
+    params.setdefault('guardar_imagen', False)
+    params.setdefault('path', '')
+    
+    BlockWidth = params['BlockWidth']
+    BlockHeight = params['BlockHeight']
+    xsize = params['xsize']
+    ysize = params['ysize']
+    cmap = params['cmap']
+    show_block_label = params['show_block_label']
+    show_grid = params['show_grid']
+    show_legend = params['show_legend']
+    dpi = params['dpi']
+    highlight_blocks = params['destacar_bloques']
+    points = params['puntos']
+    arrows = params['flechas']
+    sectors = params['sectores']
+    precedences = params['precedencias']
+    centers = params['centros']
+    elipse = params['elipse']
+    save_as_image = params['guardar_imagen']
+    path_to_save = params['path']
+
     if not text_hue:
         text_hue = column_hue
     
@@ -677,9 +733,8 @@ clusterizar con fronteras (clustering within boundaries).
 Devuelve una matriz sparse (CSR).
 En caso de definir sectores, depende de Hadamard_Product_Sparse.
 '''
-def Calculate_Adjency_Matrix(FaseBanco, 
-                             BlockWidth, BlockHeight, 
-                             Sectores=[], debug=False):
+def Calculate_Adjency_Matrix(FaseBanco, BlockWidth=10, BlockHeight=10, Sectores=[]):
+    
     x = FaseBanco['x'].values
     y = FaseBanco['y'].values
 
@@ -719,10 +774,10 @@ def Calculate_Adjency_Matrix(FaseBanco,
         adjency_matrix = Hadamard_Product_Sparse(adjency_matrix, sector_matrix)
         adjency_matrix.eliminate_zeros()
 
-        if debug:
-            return adjency_matrix, sector_matrix, fase_banco
-        else:
-            return adjency_matrix
+        # if debug:
+        #     return adjency_matrix, sector_matrix, fase_banco
+        # else:
+        return adjency_matrix
 
     else:
         return adjency_matrix
@@ -734,18 +789,30 @@ y/o dirección de minería.
 Para no usar un criterio, basta con asignar el valor 0 en el peso o penalización correspondiente.
 Devuelve una matriz densa.
 '''
-def Calculate_Similarity_Matrix(
-        FaseBanco, 
-        peso_distancia = 2, 
-        peso_ley = 0, 
-        penalizacion_destino = 0.9, 
-        penalizacion_roca = 0.9,
-        peso_directional_mining = 0.25,
-        tol_ley = 0.01,
-        tol_directional_mining = 0.001,
-        P_inicio = (-1,-1),
-        P_final = (1,1)
-        ):
+def Calculate_Similarity_Matrix(FaseBanco, params = dict()):
+    if FaseBanco.empty:
+        raise ValueError('Inserte una FaseBanco no vacía')
+    
+    params.setdefault('peso_distancia', 2)
+    params.setdefault('peso_ley', 0)
+    params.setdefault('tolerancia_ley', 0.001)
+    params.setdefault('peso_direccion_mineria', 0.25)
+    params.setdefault('tolerancia_direccion_mineria', 0.001)
+    params.setdefault('vector_mineria', None)
+    params.setdefault('penalizacion_destino', 0.9)
+    params.setdefault('penalizacion_roca', 0.9)
+
+    peso_distancia = params['peso_distancia']
+    peso_ley = params['peso_ley']
+    tol_ley = params['tolerancia_ley']
+    peso_directional_mining = params['peso_direccion_mineria']
+    tol_directional_mining = params['tolerancia_direccion_mineria']
+    if params['vector_mineria']==None:
+        peso_directional_mining = 0
+    else:
+        P_inicio, P_final = params['vector_mineria']
+    penalizacion_destino = params['penalizacion_destino']
+    penalizacion_roca = params['penalizacion_roca']
 
     n = len(FaseBanco)
 
@@ -755,48 +822,64 @@ def Calculate_Similarity_Matrix(
     y = FaseBanco['y'].values
 
     # Distancia
-    X1 = matlib.repmat(x.reshape(len(x),1), 1, len(x))
-    X2 = X1.T
-    Y1 = matlib.repmat(y.reshape(len(y),1), 1, len(y))
-    Y2 = Y1.T
+    if peso_distancia==0:
+        D = 1
+        ND = 1
+    else:
+        X1 = matlib.repmat(x.reshape(len(x),1), 1, len(x))
+        X2 = X1.T
+        Y1 = matlib.repmat(y.reshape(len(y),1), 1, len(y))
+        Y2 = Y1.T
 
-    D = np.sqrt((X1 - X2)**2 + (Y1 - Y2)**2)
-
-    ND = D / np.max(D)
+        D = np.sqrt((X1 - X2)**2 + (Y1 - Y2)**2)
+        ND = D / np.max(D)
 
     # Ley
-    g = FaseBanco['cut'].values
-    G1 = matlib.repmat(g.reshape(len(g),1), 1, len(g))
-    G2 = G1.T
+    if peso_ley == 0:
+        G = 1
+        NG = 1
+    else:
+        g = FaseBanco['cut'].values
+        G1 = matlib.repmat(g.reshape(len(g),1), 1, len(g))
+        G2 = G1.T
 
-    G = np.maximum(np.abs(G1 - G2), tol_ley)
-
-    NG = G / np.max(G)
+        G = np.maximum(np.abs(G1 - G2), tol_ley)
+        NG = G / np.max(G)
 
     # Destino
-    t = FaseBanco['destino'].values
-    T1 = matlib.repmat(t.reshape(len(t),1), 1, len(t))
-    T2 = T1.T
-    T = T1 != T2
+    if penalizacion_destino==0:
+        T = 1
+    else:
+        t = FaseBanco['destino'].values
+        T1 = matlib.repmat(t.reshape(len(t),1), 1, len(t))
+        T2 = T1.T
+        T = T1 != T2
 
-    T = np.ones((n,n)) - (1-penalizacion_destino)*T*np.ones((n,n))
+        T = np.ones((n,n)) - (1-penalizacion_destino)*T*np.ones((n,n))
 
     # Tipo Roca/Material
     if 'tipomineral' in FaseBanco.columns:
-        rock = FaseBanco['tipomineral'].values
-        R1 = matlib.repmat(rock.reshape(len(rock),1), 1, len(rock))
-        R2 = R1.T
-        R = R1 != R2
+        if penalizacion_roca==0:
+            R=1
+        else:
+            rock = FaseBanco['tipomineral'].values
+            R1 = matlib.repmat(rock.reshape(len(rock),1), 1, len(rock))
+            R2 = R1.T
+            R = R1 != R2
 
-        R = np.ones((n,n)) - (1-penalizacion_roca)*R*np.ones((n,n))
+            R = np.ones((n,n)) - (1-penalizacion_roca)*R*np.ones((n,n))
     else:
         R = 1
 
     # Dirección de minería
-    M1 = (X1 - P_inicio[0])**2 + (Y1 - P_inicio[1])**2
-    M2 = (X1 - P_final[0])**2 + (Y1 - P_final[1])**2
-    Mi = np.multiply( np.sign( M1 - M2 ), np.sqrt( np.abs(M1 - M2 )) )
-    DM = np.maximum(np.abs(Mi - Mi.T), tol_directional_mining)
+    if peso_directional_mining==0:
+        DM = 1
+        NDM = 1
+    else:
+        M1 = (X1 - P_inicio[0])**2 + (Y1 - P_inicio[1])**2
+        M2 = (X1 - P_final[0])**2 + (Y1 - P_final[1])**2
+        Mi = np.multiply( np.sign( M1 - M2 ), np.sqrt( np.abs(M1 - M2 )) )
+        DM = np.maximum(np.abs(Mi - Mi.T), tol_directional_mining)
 
     NDM = DM / np.max(DM)
 
@@ -841,11 +924,18 @@ Average_Desired_Length_Cluster y Max_Cluster_Length son restricciones del tamañ
 Depende de la funcion Find_Most_Similar_Adjacent_Clusters.
 Devuelve un DataFrame de la fase-banco incluyendo una nueva columna llamada 'cluster' que indica el cluster al que pertenece cada bloque.
 '''
-def Clustering_Tabesh(
-        FaseBanco, AdjencyMatrix, SimilarityMatrix,
-        Average_Desired_Length_Cluster = 30, Max_Cluster_Length = 35,
-        Reset_Clusters_Index = True, debug = False
-        ):
+def Clustering_Tabesh(FaseBanco, AdjencyMatrix, SimilarityMatrix, params=dict()):
+    params.setdefault('Average_Length_Cluster', 30)
+    params.setdefault('Max_Length_Cluster', 35)
+    params.setdefault('Reset_Clusters_Index', True)
+    params.setdefault('debug', False)
+
+    Average_Desired_Length_Cluster = params['Average_Length_Cluster']
+    Max_Cluster_Length = params['Max_Length_Cluster']
+    Reset_Clusters_Index = params['Reset_Clusters_Index']
+    debug = params['debug']
+
+    
     fase_banco = FaseBanco.copy()
     adj_matrix_sparse = AdjencyMatrix
     sim_matrix = SimilarityMatrix
@@ -1210,11 +1300,13 @@ Calcula las precedencias de los clusters. Actualiza el dataframe FaseBanco con e
 un diccionario con las precedencias junto con los centros de los clusters.
 Depende de Calculate_Adjency_Matrix.
 '''
-def Precedencias_Clusters_Agend(FaseBanco, P_inicio, P_final, 
+def Precedencias_Clusters_Agend(FaseBanco, vector_mineria, 
                                 BlockWidth=10, BlockHeight=10, Distance_Option=True):
     fase_banco = FaseBanco.copy()
     ID_Clusters = fase_banco['cluster'].unique()
     Num_Clusters = len(ID_Clusters)
+
+    P_inicio, P_final = vector_mineria
     
     t1 = time.time()
     Centers = Centros_Clusters(FaseBanco)
@@ -1303,11 +1395,13 @@ Calcula las precedencias de los clusters. Actualiza el dataframe FaseBanco con e
 un diccionario con las precedencias junto con los centros de los clusters.
 Depende de Calculate_Adjency_Matrix.
 '''
-def Precedencias_Clusters_Angle(FaseBanco, P_inicio, P_final, 
+def Precedencias_Clusters_Angle(FaseBanco, vector_mineria, 
                                 BlockWidth=10, BlockHeight=10, Distance_Option=True, Angle=0):
     fase_banco = FaseBanco.copy()
     ID_Clusters = fase_banco['cluster'].unique()
     Num_Clusters = len(ID_Clusters)
+
+    P_inicio, P_final = vector_mineria
     
     t1 = time.time()
     Centers = Centros_Clusters(FaseBanco)
@@ -1337,7 +1431,7 @@ def Precedencias_Clusters_Angle(FaseBanco, P_inicio, P_final,
     Dic_Precedencias[list(distancias_al_inicio.keys())[0]] = []
     Clusters_Candidatos = set()
 
-    Angle = Angle*np.pi/180
+    # Angle = Angle*np.pi/180
     vector_dir_min = np.array(( P_final[0]-P_inicio[0], P_final[1]-P_inicio[1] ))
     vector_dir_min = vector_dir_min/np.linalg.norm(vector_dir_min, 2)
 
@@ -1496,6 +1590,8 @@ def isin_cone(mina_rellena, params_cono,
     a, b, h, x_cone, y_cone, alpha = params_cono
     z_c = mina_rellena['z'].max()
 
+    index_mina_rellena = mina_rellena.index
+
     a += horizontal_tolerance
     b += horizontal_tolerance
 
@@ -1515,16 +1611,21 @@ def isin_cone(mina_rellena, params_cono,
     z_rel = (h-z_c+z)/h
     norm_rel = E[0,0]*(x-x_cone)**2 + 2*E[0,1]*(x-x_cone)*(y-y_cone) + E[1,1]*(y-y_cone)**2
 
-    points_in = pd.Series(norm_rel<=z_rel**2, name='isin_cone')
+    points_in = pd.Series(norm_rel<=z_rel**2, name='isin_cone', index=index_mina_rellena)
 
     if Minimum_Area > 0:
         Z = sorted(mina_rellena['z'].unique())
         Z_rel = (h-z_c+Z)/h
 
-        A_z = a*Z_rel
-        B_z = b*Z_rel
+        Areas_z = []
+        for z in Z_rel:
+            if z < 0:
+                Areas_z.append(-1e20)
+            else:
+                Areas_z.append(np.pi*a*b*z**2)
 
-        Areas_z = np.pi*A_z*B_z
+        Areas_z = np.array(Areas_z)
+
         if Minimum_Area >= Areas_z.max():
             Warning('Valor de Minimum_base_area demasiado alto.')
             return pd.Series()
@@ -1533,7 +1634,9 @@ def isin_cone(mina_rellena, params_cono,
 
         z_min = Z[index_z_min]
 
-        points_in = points_in & (mina_rellena['z']>=z_min)
+        mask_z = pd.Series(mina_rellena['z']>=z_min, name='z_filter', index=index_mina_rellena)
+
+        points_in = points_in & mask_z
 
     return points_in
 
@@ -1543,9 +1646,13 @@ Calcula el beneficio esperado (sin tiempo) del cono especificado
 '''
 def profit(mina_rellena, params_cono, 
            Minimum_Area=0, horizontal_tolerance=0):
-    points_in_cone = mina_rellena[isin_cone(mina_rellena, params_cono, 
+    in_cone = isin_cone(mina_rellena, params_cono, 
                                             Minimum_Area=Minimum_Area, 
-                                            horizontal_tolerance=horizontal_tolerance)]
+                                            horizontal_tolerance=horizontal_tolerance)
+    if in_cone.empty:
+        return 0
+    
+    points_in_cone = mina_rellena[in_cone]
 
     return points_in_cone['value'].sum()
 
@@ -1563,6 +1670,8 @@ def Best_Cone_by_Volume(mina, max_global_angle=45):
     a_guess = (2/3)*(mina['x'].max() - mina['x'].min())
     b_guess = (2/3)*(mina['y'].max() - mina['y'].min())
     h_guess = (4/3)*(mina['z'].max() - mina['z'].min())
+    x_guess = mina['x'].median()
+    y_guess = mina['y'].median()
     alpha_guess = 0
 
     def objective(params):
@@ -1597,13 +1706,16 @@ def Best_Cone_by_Volume(mina, max_global_angle=45):
                         'fun': lambda params: max_global_angle - np.arctan(params[2]/params[0])*180/np.pi})
     constraints.append({'type': 'ineq',
                         'fun': lambda params: max_global_angle - np.arctan(params[2]/params[1])*180/np.pi})
-    constraints.append({'type': 'ineq',
-                        'fun': lambda params: np.pi/2 - params[5]})
-    constraints.append({'type': 'ineq',
-                        'fun': lambda params: params[5] + np.pi/2})
 
-    initial_guess = (a_guess, b_guess, h_guess, x_c, y_c, alpha_guess)
-    result = sp.optimize.minimize(objective, initial_guess, constraints=constraints, method='SLSQP')
+    bounds = [(None, None),
+          (None, None),
+          (None, None),
+          (None, None),
+          (None, None),
+          (-np.pi/2, np.pi/2)]
+
+    initial_guess = (a_guess, b_guess, h_guess, x_guess, y_guess, alpha_guess)
+    result = sp.optimize.minimize(objective, initial_guess, bounds=bounds,constraints=constraints, method='SLSQP', options={'ftol':1e-9})
 
     print(result)
     return result
@@ -1683,20 +1795,20 @@ def Best_Cone_by_Profit_diff_evol(mina, mina_rellena, max_global_angle=45, Minim
     y_c = mina['y'].mean()
     z_c = mina['z'].max()
 
-    a_low = (0.1)*(mina['x'].max() - mina['x'].min())
-    a_up = (1)*(mina['x'].max() - mina['x'].min())
+    a_low = (0.5)*(mina['x'].max() - mina['x'].min())
+    a_up = (2)*(mina['x'].max() - mina['x'].min())
 
-    b_low = (0.1)*(mina['y'].max() - mina['y'].min())
-    b_up = (1)*(mina['y'].max() - mina['y'].min())
+    b_low = (0.5)*(mina['y'].max() - mina['y'].min())
+    b_up = (2)*(mina['y'].max() - mina['y'].min())
 
-    h_low = (0.1)*(mina['z'].max() - mina['z'].min())
+    h_low = (0.3)*(mina['z'].max() - mina['z'].min())
     h_up = (2)*(mina['z'].max() - mina['z'].min())
 
-    lambda_x = 0.4
+    lambda_x = 0.1
     x_low = (1-lambda_x)*mina['x'].min() + (lambda_x)*mina['x'].max()
     x_up = (lambda_x)*mina['x'].min() + (1-lambda_x)*mina['x'].max()
 
-    lambda_y = 0.4
+    lambda_y = 0.1
     y_low = (1-lambda_y)*mina['y'].min() + (lambda_y)*mina['y'].max()
     y_up = (lambda_y)*mina['y'].min() + (1-lambda_y)*mina['y'].max()
 
@@ -1733,9 +1845,9 @@ def Best_Cone_by_Profit_diff_evol(mina, mina_rellena, max_global_angle=45, Minim
 Identificación de altura mínima de la mina de acuerdo a un criterio de área mínima.
 '''
 def Z_min(mina, cono, Minimum_Area=1e6, debug=False):
-    a, b, h, x_c, y_c, alpha = cono
+    a, b, h, x_c, y_c, alpha, z_c = cono
     Z_values = sorted(mina['z'].unique())
-    z_c = mina['z'].max()
+    # z_c = mina['z'].max()
 
     z_min = z_c
     for z in Z_values:
@@ -1750,24 +1862,23 @@ def Z_min(mina, cono, Minimum_Area=1e6, debug=False):
 
     return z_min
 
-'''
-Creación de rampa embebida en el cono con cierta pendiente de descenso y ángulo inicial.
-'''
-def Rampa(mina, cono=None, descenso=0.10, theta_0=0, n=1000, orientation=1, z_min=None, max_vueltas=5):
+
+def Rampa(cono, params_rampa, z_min=None, n=300, max_vueltas=3):
     if cono is None or len(cono)==0:
         raise Exception('Debe adjuntar cono')
-    if orientation >= 0:
-        orientation = 1
-    else:
-        orientation = -1
     
-    theta_0 = np.radians(theta_0)
+    theta_0, descenso, orientacion, z_switchback = params_rampa
+
+    if orientacion >= 0:
+        orientacion = 1
+    else:
+        orientacion = -1
+
     Angulo_Descenso = np.arcsin(descenso)
     t_final=2*max_vueltas*np.pi
 
-    z_c = mina['z'].max()
     p = -np.sin(Angulo_Descenso)
-    a, b, h, x_cone, y_cone, alpha_cone = cono
+    a, b, h, x_cone, y_cone, alpha_cone, z_c = cono
 
     T = np.linspace(0, t_final, n)
     X_curve = []
@@ -1791,9 +1902,9 @@ def Rampa(mina, cono=None, descenso=0.10, theta_0=0, n=1000, orientation=1, z_mi
             t0 = 0
         else:
             R_1 = a*np.cos(theta)*np.cos(alpha_cone) - b*np.sin(theta)*np.sin(alpha_cone)
-            dR_1 = (-a*np.sin(theta)*np.cos(alpha_cone) - b*np.cos(theta)*np.sin(alpha_cone))*orientation
+            dR_1 = (-a*np.sin(theta)*np.cos(alpha_cone) - b*np.cos(theta)*np.sin(alpha_cone))*orientacion
             R_2 = a*np.cos(theta)*np.sin(alpha_cone) + b*np.sin(theta)*np.cos(alpha_cone)
-            dR_2 = (-a*np.sin(theta)*np.sin(alpha_cone) + b*np.cos(theta)*np.cos(alpha_cone))*orientation
+            dR_2 = (-a*np.sin(theta)*np.sin(alpha_cone) + b*np.cos(theta)*np.cos(alpha_cone))*orientacion
 
             A = p**2 - 1 + p**2 * R_1**2/h**2 + p**2 * R_2**2/h**2
             B = (2*p**2/h)*(R_1*dR_1 + R_2*dR_2)*(1-z_c/h + z/h)
@@ -1801,15 +1912,138 @@ def Rampa(mina, cono=None, descenso=0.10, theta_0=0, n=1000, orientation=1, z_mi
 
             dz = ((-B) + np.sqrt( B**2 - 4*A*C ))/(2*A)
 
-            theta_new = theta_0 + orientation*t
             z_new = z + (t-t0)*dz
+            theta_new = theta_0 + orientacion*t
+            
 
             x = (a*np.cos(theta_new)*np.cos(alpha_cone) - b*np.sin(theta_new)*np.sin(alpha_cone))*(1-z_c/h+z_new/h) + x_cone
             y = (a*np.cos(theta_new)*np.sin(alpha_cone) + b*np.sin(theta_new)*np.cos(alpha_cone))*(1-z_c/h+z_new/h) + y_cone
 
             X_curve.append(x)
             Y_curve.append(y)
-            Z_curve.append(z)
+            Z_curve.append(z_new)
+
+            t0 = t
+            z = z_new
+            theta = theta_new
+
+            if stop:
+                break
+
+            if z_min:
+                if z_new < z_min:
+                    stop = True
+            
+    return X_curve, Y_curve, Z_curve
+
+
+
+'''
+Creación de rampa embebida en el cono con cierta pendiente de descenso y ángulo inicial.
+'''
+def Rampa_switchback(cono, params_rampa, n=300, max_vueltas=3, ancho_rampa=0, z_min=None):
+    theta_0, descenso, orientacion, z_switchback = params_rampa
+
+    if orientacion >= 0:
+        orientacion = 1
+    else:
+        orientacion = -1
+
+    Angulo_Descenso = np.arcsin(descenso)
+    t_final = 2*max_vueltas*np.pi
+
+    p = -np.sin(Angulo_Descenso)
+    a, b, h, x_cone, y_cone, alpha_cone, z_c = cono
+
+    if z_switchback:
+        a += 2*ancho_rampa
+        b += 2*ancho_rampa
+        
+    T = np.linspace(0, t_final, n)
+    X_curve = []
+    Y_curve = []
+    Z_curve = []
+
+    z = z_c
+    theta = theta_0
+
+    x = (a*np.cos(theta_0)*np.cos(alpha_cone) - b*np.sin(theta_0)*np.sin(alpha_cone)) + x_cone
+    y = (a*np.cos(theta_0)*np.sin(alpha_cone) + b*np.sin(theta_0)*np.cos(alpha_cone)) + y_cone
+
+    X_curve.append(x)
+    Y_curve.append(y)
+    Z_curve.append(z)
+    
+    stop = False
+
+    for t in T:
+        if t == 0:
+            t0 = 0
+        else:
+            R_1 = a*np.cos(theta)*np.cos(alpha_cone) - b*np.sin(theta)*np.sin(alpha_cone)
+            dR_1 = (-a*np.sin(theta)*np.cos(alpha_cone) - b*np.cos(theta)*np.sin(alpha_cone))*orientacion
+            R_2 = a*np.cos(theta)*np.sin(alpha_cone) + b*np.sin(theta)*np.cos(alpha_cone)
+            dR_2 = (-a*np.sin(theta)*np.sin(alpha_cone) + b*np.cos(theta)*np.cos(alpha_cone))*orientacion
+
+            A = p**2 - 1 + p**2 * R_1**2/h**2 + p**2 * R_2**2/h**2
+            B = (2*p**2/h)*(R_1*dR_1 + R_2*dR_2)*(1-z_c/h + z/h)
+            C = p**2*(dR_1**2 + dR_2**2)*(1 - z_c/h + z/h)**2
+
+            dz = ((-B) + np.sqrt( B**2 - 4*A*C ))/(2*A)
+
+            z_new = z + (t-t0)*dz
+            theta_new = theta_0 + orientacion*t
+
+            if z_switchback:
+                if z_new<z_switchback:
+                    orientacion *= -1
+                    a_before = a
+                    b_before = b
+                    a -= 2*ancho_rampa
+                    b -= 2*ancho_rampa
+
+                    S = np.linspace(0, 1, 10)[:-1]
+                    x_before = (a_before*np.cos(theta_new)*np.cos(alpha_cone) - b_before*np.sin(theta_new)*np.sin(alpha_cone))*(1-z_c/h+z_new/h) + x_cone
+                    y_before = (a_before*np.cos(theta_new)*np.sin(alpha_cone) + b_before*np.sin(theta_new)*np.cos(alpha_cone))*(1-z_c/h+z_new/h) + y_cone
+                    x = (a*np.cos(theta_new)*np.cos(alpha_cone) - b*np.sin(theta_new)*np.sin(alpha_cone))*(1-z_c/h+z_new/h) + x_cone
+                    y = (a*np.cos(theta_new)*np.sin(alpha_cone) + b*np.sin(theta_new)*np.cos(alpha_cone))*(1-z_c/h+z_new/h) + y_cone
+
+                    X_p = list(x_before + (x - x_before)*S)
+                    Y_p = list(y_before + (y - y_before)*S)
+                    Z_p = [z_new]*len(S)
+
+                    X_curve = X_curve + X_p
+                    Y_curve = Y_curve + Y_p
+                    Z_curve = Z_curve + Z_p
+                    
+                    t0 = t
+                    z = z_new
+                    theta = theta_new
+
+                    if stop:
+                        break
+
+                    if z_min:
+                        if z_new < z_min:
+                            stop = True
+
+                    z_switchback = None
+                    
+                    cono_sw = [a*(1-z_c/h+z_new/h), b*(1-z_c/h+z_new/h), h-(z_c-z_new), x_cone, y_cone, alpha_cone, z_new]
+                    params_rampa_sw = [theta_new, descenso, orientacion, None]
+
+                    X, Y, Z = Rampa(cono_sw, params_rampa_sw, n=300, z_min=z_min, max_vueltas=3)
+                    X_curve = X_curve + X
+                    Y_curve = Y_curve + Y
+                    Z_curve = Z_curve + Z
+                    break
+
+            x = (a*np.cos(theta_new)*np.cos(alpha_cone) - b*np.sin(theta_new)*np.sin(alpha_cone))*(1-z_c/h+z_new/h) + x_cone
+            y = (a*np.cos(theta_new)*np.sin(alpha_cone) + b*np.sin(theta_new)*np.cos(alpha_cone))*(1-z_c/h+z_new/h) + y_cone
+
+            X_curve.append(x)
+            Y_curve.append(y)
+            Z_curve.append(z_new)
 
             t0 = t
             z = z_new
@@ -1825,13 +2059,13 @@ def Rampa(mina, cono=None, descenso=0.10, theta_0=0, n=1000, orientation=1, z_mi
 
     return X_curve, Y_curve, Z_curve
 
+
 '''
 Identifica los id de los bloques que cruzan la rampa, incluyendo precedencias horizontales de minado.
 '''
-def isin_rampa(mina, mina_rellena, cono, BlockHeightZ,
-                 rampa, ancho_rampa, ord=np.inf):
+def isin_rampa(mina, mina_rellena, rampa, cono, BlockHeightZ,
+            ancho_rampa, ord=np.inf):
     id_bloques_in_rampa = set()
-    id_bloques_out_rampa = set()
 
     X_curve, Y_curve, Z_curve = rampa
     X_curve = np.array(X_curve)
@@ -1839,7 +2073,7 @@ def isin_rampa(mina, mina_rellena, cono, BlockHeightZ,
     Z_curve = np.array(Z_curve) + BlockHeightZ/2
     alturas = np.array(sorted(mina_rellena['z'].unique()))
 
-    a, b, h, x_c, y_c, alpha = cono
+    a, b, h, x_c, y_c, alpha, z_c = cono
     center = np.array([x_c, y_c])
 
     x_all = mina_rellena['x'].values
@@ -1854,15 +2088,13 @@ def isin_rampa(mina, mina_rellena, cono, BlockHeightZ,
     for x, y, z in zip(X_curve, Y_curve, Z_curve):
         z_cercano_en_mina = alturas[np.abs((alturas - z)).argmin()]
         z_mask = (z_all == z_cercano_en_mina)
-
-
+        
         point = np.array([x,y])
 
         lenght_seg = np.linalg.norm(point - center)
         n_seg = int(np.trunc(2*lenght_seg/ancho_rampa) + 1)
         T = np.linspace(0, 1, n_seg).reshape(-1,1)
         segmento_in = center + (point-center)*T
-        segmento_out = (point + ((point-center)/lenght_seg)*ancho_rampa) + (point-center)*T
 
         for P in segmento_in:
             x_p, y_p = P
@@ -1875,21 +2107,10 @@ def isin_rampa(mina, mina_rellena, cono, BlockHeightZ,
 
             ids = id_all[z_mask][mask]
             id_bloques_in_rampa.update(ids)
-
-        # for P in segmento_out:
-        #     x_p, y_p = P
-        #     dx = x_all[z_mask] - x_p
-        #     dy = y_all[z_mask] - y_p
-
-        #     dist = np.linalg.norm(np.array([dx, dy]), axis=0, ord=ord)
-        #     mask = (dist <= radio)
-
-        #     ids = id_all[z_mask][mask]
-        #     id_bloques_out_rampa.update(ids)
     
     id_mina = set(mina['id'])
 
-    return (id_bloques_in_rampa - id_mina), id_bloques_out_rampa
+    return (id_bloques_in_rampa - id_mina)
 
 
 
@@ -1951,14 +2172,14 @@ def Best_Ramp_sp(mina, mina_rellena, params_cono, min_area,
 
     bounds = [(-np.pi, np.pi), (0, 0.15), (-1, 1)]
     if len(x0)==0:
-        x0 = [0, 0.15, 0.5]
+        x0 = [0, 0.1, 0.5]
 
     def objective(params):
         theta, descenso, orientation = params
         rampa = Rampa(mina, cono=list(params_cono), z_min=z_min, descenso=descenso,
                       theta_0=np.radians(theta), orientation=orientation, n=ref_rampa)
 
-        id_in_rampa, id_out_rampa = isin_rampa(mina, mina_rellena, cono=params_cono, BlockHeightZ=BlockHeightZ, rampa=rampa, ancho_rampa=ancho_rampa, ord=np.inf)
+        id_in_rampa = isin_rampa(mina, mina_rellena, cono=params_cono, BlockHeightZ=BlockHeightZ, rampa=rampa, ancho_rampa=ancho_rampa, ord=np.inf)
 
         all_precedences, all_support = total_additional_blocks(mina_rellena, id_in_rampa,
                                                   BlockWidth, BlockHeight, BlockHeightZ,
@@ -1990,7 +2211,7 @@ def Best_Ramp_diff_evol(mina, mina_rellena, params_cono, min_area, ancho_rampa, 
         rampa = Rampa(mina, cono=list(params_cono), z_min=z_min, descenso=descenso,
                       theta_0=np.radians(theta), orientation=orientation, n=ref_rampa)
 
-        id_in_rampa, id_out_rampa = isin_rampa(mina, mina_rellena, cono=params_cono, BlockHeightZ=BlockHeightZ, rampa=rampa, ancho_rampa=ancho_rampa, ord=np.inf)
+        id_in_rampa = isin_rampa(mina, mina_rellena, cono=params_cono, BlockHeightZ=BlockHeightZ, rampa=rampa, ancho_rampa=ancho_rampa, ord=np.inf)
 
         all_precedences, all_support = total_additional_blocks(mina_rellena, id_in_rampa,
                                                   BlockWidth, BlockHeight, BlockHeightZ,
@@ -2007,8 +2228,6 @@ def Best_Ramp_diff_evol(mina, mina_rellena, params_cono, min_area, ancho_rampa, 
     print(result)
     return result
 
-from skopt import gp_minimize
-from skopt.space import Real
 
 def Best_Ramp_gp(mina, mina_rellena, params_cono, min_area, ancho_rampa, x0=[],
                  ref_rampa=500, angulo_apertura_up=20, angulo_apertura_down=20, config='9-points',
@@ -2016,10 +2235,9 @@ def Best_Ramp_gp(mina, mina_rellena, params_cono, min_area, ancho_rampa, x0=[],
 
     z_min = Z_min(mina, params_cono, Minimum_Area=min_area)
 
-    # Definimos los espacios de búsqueda
     space = [
-        Real(-np.pi, np.pi, name='theta'),        # en radianes
-        Real(0, 0.15, name='descenso'),
+        Real(-np.pi, np.pi, name='theta'),
+        Real(0.05, 0.15, name='descenso'),
         Real(-1, 1, name='orientation')
     ]
 
@@ -2028,7 +2246,7 @@ def Best_Ramp_gp(mina, mina_rellena, params_cono, min_area, ancho_rampa, x0=[],
         rampa = Rampa(mina, cono=list(params_cono), z_min=z_min, descenso=descenso,
                       theta_0=np.radians(theta), orientation=orientation, n=ref_rampa)
 
-        id_in_rampa, id_out_rampa = isin_rampa(mina, mina_rellena, cono=params_cono, BlockHeightZ=BlockHeightZ, rampa=rampa, ancho_rampa=ancho_rampa, ord=np.inf)
+        id_in_rampa = isin_rampa(mina, mina_rellena, cono=params_cono, BlockHeightZ=BlockHeightZ, rampa=rampa, ancho_rampa=ancho_rampa, ord=np.inf)
 
         all_precedences, all_support = total_additional_blocks(mina_rellena, id_in_rampa,
                                                   BlockWidth, BlockHeight, BlockHeightZ,
@@ -2040,7 +2258,6 @@ def Best_Ramp_gp(mina, mina_rellena, params_cono, min_area, ancho_rampa, x0=[],
 
         return -mina_con_rampa['value'].sum()
 
-    # Llamamos al optimizador bayesiano
     result = gp_minimize(
         func=objective,
         dimensions=space,
@@ -2055,6 +2272,62 @@ def Best_Ramp_gp(mina, mina_rellena, params_cono, min_area, ancho_rampa, x0=[],
     print("Descenso:", result.x[1])
     print("Orientación:", result.x[2])
     print("Valor objetivo (negativo):", result.fun)
+
+    return result
+
+
+
+def Best_Ramp_gp_switchback(mina, mina_rellena, params_cono, min_area, ancho_rampa, x0=[],
+                 ref_rampa=500, angulo_apertura_up=20, angulo_apertura_down=20, config='9-points',
+                 BlockWidth=10, BlockHeight=10, BlockHeightZ=16, n_calls=50, random_state=42):
+
+    z_min = Z_min(mina, params_cono, Minimum_Area=min_area)
+    z_max = mina['z'].max()
+    alpha_z = 0.1
+    z_low = (1-alpha_z)*z_min + alpha_z*z_max
+    z_top = (alpha_z)*z_min + (1-alpha_z)*z_max
+    space = [
+        Real(-np.pi, np.pi, name='theta'),
+        Real(0.05, 0.15, name='descenso'),
+        Real(-1, 1, name='orientacion'),
+        Real(z_low, z_top, name='z_switchback'),
+        Categorical(['none', 'value'], name='switchback_mode')
+    ]
+
+    def objective(params):
+        z_switchback, switchback_mode = params[3], params[4]
+        z_switchback = None if switchback_mode == 'none' else z_switchback
+        params_rampa = (params[0], params[1], params[2], z_switchback)
+
+        rampa = Rampa_switchback(params_cono, params_rampa, n=ref_rampa, ancho_rampa=ancho_rampa, z_min=z_min)
+
+        id_in_rampa = isin_rampa(mina, mina_rellena, cono=params_cono, BlockHeightZ=BlockHeightZ, rampa=rampa, ancho_rampa=ancho_rampa, ord=np.inf)
+
+        all_precedences, all_support = total_additional_blocks(mina_rellena, id_in_rampa,
+                                                  BlockWidth, BlockHeight, BlockHeightZ,
+                                                  config=config, angulo_apertura_up=angulo_apertura_up,
+                                                  angulo_apertura_down=angulo_apertura_down)
+
+        total_ids = (set(mina['id']) | all_precedences) - all_support
+        mina_con_rampa = mina_rellena[mina_rellena['id'].isin(total_ids)]
+
+        return -mina_con_rampa['value'].sum()
+
+    result = gp_minimize(
+        func=objective,
+        dimensions=space,
+        n_calls=n_calls,
+        x0=x0 if x0 else None,
+        random_state=random_state,
+        verbose=True
+    )
+
+    print("Mejor solución encontrada:")
+    print("θ (rad):", result.x[0])
+    print("Descenso:", result.x[1])
+    print("Orientación:", result.x[2])
+    print('Switchback:', result.x[3])
+    print("Valor objetivo:", result.fun)
 
     return result
 
