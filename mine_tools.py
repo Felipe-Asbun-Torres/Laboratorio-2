@@ -518,8 +518,8 @@ def plot_fase_banco(FaseBanco, column_hue='cut', text_hue=None, params=dict()):
     if FaseBanco.empty:
         raise ValueError("El DataFrame 'FaseBanco' está vacío. No se puede graficar.")
 
-    params.setdefault('BlockWidth', 10)
-    params.setdefault('BlockHeight', 10)
+    params.setdefault('BlockWidthX', 10)
+    params.setdefault('BlockWidthY', 10)
     params.setdefault('xsize', 10)
     params.setdefault('ysize', 10)
     params.setdefault('cmap', 'plasma')
@@ -537,8 +537,8 @@ def plot_fase_banco(FaseBanco, column_hue='cut', text_hue=None, params=dict()):
     params.setdefault('guardar_imagen', False)
     params.setdefault('path', '')
     
-    BlockWidth = params['BlockWidth']
-    BlockHeight = params['BlockHeight']
+    BlockWidthX = params['BlockWidthX']
+    BlockWidthY = params['BlockWidthY']
     xsize = params['xsize']
     ysize = params['ysize']
     cmap = params['cmap']
@@ -596,15 +596,15 @@ def plot_fase_banco(FaseBanco, column_hue='cut', text_hue=None, params=dict()):
         y_center = row['y']
         block_value = row[column_hue]
 
-        x_corner = x_center - BlockWidth / 2
-        y_corner = y_center - BlockHeight / 2
+        x_corner = x_center - BlockWidthX / 2
+        y_corner = y_center - BlockWidthY / 2
 
         if is_continuous:
             color = colormap(norm(block_value))
         else:
             color = color_map_discrete.get(block_value, 'gray')
         # print(color)
-        rect = patches.Rectangle((x_corner, y_corner), BlockWidth, BlockHeight, linewidth=0.5, edgecolor='black', facecolor=color)
+        rect = patches.Rectangle((x_corner, y_corner), BlockWidthX, BlockWidthY, linewidth=0.5, edgecolor='black', facecolor=color)
         ax.add_patch(rect)
         if show_block_label:
             block_text = row[text_hue]
@@ -615,12 +615,12 @@ def plot_fase_banco(FaseBanco, column_hue='cut', text_hue=None, params=dict()):
             ax.text(x_center, y_center, str(block_text), ha='center', va='center', fontsize=8, color='black')
     
 
-    x_min = FaseBanco['x'].min() - 5*BlockWidth
-    x_max = FaseBanco['x'].max() + 5*BlockHeight
+    x_min = FaseBanco['x'].min() - 5*BlockWidthX
+    x_max = FaseBanco['x'].max() + 5*BlockWidthY
     ax.set_xlim(x_min, x_max)
 
-    y_min = FaseBanco['y'].min() - 5*BlockHeight
-    y_max = FaseBanco['y'].max() + 5*BlockHeight
+    y_min = FaseBanco['y'].min() - 5*BlockWidthX
+    y_max = FaseBanco['y'].max() + 5*BlockWidthY
     ax.set_ylim(y_min, y_max)
 
     ax.set_aspect('equal', adjustable='box')
@@ -663,7 +663,7 @@ def plot_fase_banco(FaseBanco, column_hue='cut', text_hue=None, params=dict()):
         sector_count+=1
     
     for params in elipse:
-        a, b, x_centro, y_centro, alpha = params
+        a, b, alpha, x_centro, y_centro = params
         Theta = np.linspace(0, 2*np.pi, 100)
         X_elipse = a*np.cos(Theta)*np.cos(alpha) - b*np.sin(Theta)*np.sin(alpha) + x_centro
         Y_elipse = a*np.cos(Theta)*np.sin(alpha) + b*np.sin(Theta)*np.cos(alpha) + y_centro
@@ -727,13 +727,13 @@ def Hadamard_Product_Sparse(A, B):
 
 '''
 Crea la matriz de adyacencia de los bloques de la fase-banco respecto a sus coordenadas x e y.
-Considera las dimensiones de los bloques con BlockWidth ('x') y BlockHeight ('y').
+Considera las dimensiones de los bloques con BlockWidthX ('x') y BlockWidthY ('y').
 Permite definir sectores, que son listas de coordenadas (P1,P2,P3,P4) que definen los límites de cada sector para
 clusterizar con fronteras (clustering within boundaries).
 Devuelve una matriz sparse (CSR).
 En caso de definir sectores, depende de Hadamard_Product_Sparse.
 '''
-def Calculate_Adjency_Matrix(FaseBanco, BlockWidth=10, BlockHeight=10, Sectores=[]):
+def Calculate_Adjency_Matrix(FaseBanco, BlockWidthX=10, BlockWidthY=10, Sectores=[]):
     
     x = FaseBanco['x'].values
     y = FaseBanco['y'].values
@@ -743,7 +743,7 @@ def Calculate_Adjency_Matrix(FaseBanco, BlockWidth=10, BlockHeight=10, Sectores=
     Y1 = matlib.repmat(y.reshape(len(y),1), 1, len(y))
     Y2 = Y1.T
 
-    D = np.sqrt((1/BlockWidth**2)*(X1 - X2)**2 + (1/BlockHeight**2)*(Y1 - Y2)**2)
+    D = np.sqrt((1/BlockWidthX**2)*(X1 - X2)**2 + (1/BlockWidthY**2)*(Y1 - Y2)**2)
 
     adjency_matrix = (D <= 1) & (D > 0)
     adjency_matrix = sp.sparse.csr_matrix(adjency_matrix).astype(int)
@@ -1301,7 +1301,7 @@ un diccionario con las precedencias junto con los centros de los clusters.
 Depende de Calculate_Adjency_Matrix.
 '''
 def Precedencias_Clusters_Agend(FaseBanco, vector_mineria, 
-                                BlockWidth=10, BlockHeight=10, Distance_Option=True):
+                                BlockWidthX=10, BlockWidthY=10, Distance_Option=True):
     fase_banco = FaseBanco.copy()
     ID_Clusters = fase_banco['cluster'].unique()
     Num_Clusters = len(ID_Clusters)
@@ -1312,7 +1312,7 @@ def Precedencias_Clusters_Agend(FaseBanco, vector_mineria,
     Centers = Centros_Clusters(FaseBanco)
     distancias_al_inicio = {}
     Dic_Precedencias = {}
-    adjency_matrix = Calculate_Adjency_Matrix(fase_banco, BlockWidth, BlockHeight)
+    adjency_matrix = Calculate_Adjency_Matrix(fase_banco, BlockWidthX, BlockWidthY)
 
     # Calculo de las distancias de los clusters al punto de inicio
     # Distance_Option = True, calcula la distancia proyectando a la recta de dirección de minería
@@ -1396,7 +1396,7 @@ un diccionario con las precedencias junto con los centros de los clusters.
 Depende de Calculate_Adjency_Matrix.
 '''
 def Precedencias_Clusters_Angle(FaseBanco, vector_mineria, 
-                                BlockWidth=10, BlockHeight=10, Distance_Option=True, Angle=0):
+                                BlockWidthX=10, BlockWidthY=10, Distance_Option=True, Angle=0):
     fase_banco = FaseBanco.copy()
     ID_Clusters = fase_banco['cluster'].unique()
     Num_Clusters = len(ID_Clusters)
@@ -1407,7 +1407,7 @@ def Precedencias_Clusters_Angle(FaseBanco, vector_mineria,
     Centers = Centros_Clusters(FaseBanco)
     distancias_al_inicio = {}
     Dic_Precedencias = {}
-    adjency_matrix = Calculate_Adjency_Matrix(fase_banco, BlockWidth, BlockHeight)
+    adjency_matrix = Calculate_Adjency_Matrix(fase_banco, BlockWidthX, BlockWidthY)
 
     # Calculo de las distancias de los clusters al punto de inicio
     # Distance_Option = True, calcula la distancia proyectando a la recta de dirección de minería
@@ -1504,10 +1504,10 @@ def Precedencias_Clusters_Angle(FaseBanco, vector_mineria,
 
 # Útil para cálculos de beneficio
 '''
-Rellena la mina de estéril artificial (tipomineral=-2) de densidad default_density, extendiendo a 100*BlockWidth (o BlockHeight) metros hacia los lados de la mina, salvo directamente arriba de la mina, donde rellena con aire (tipomineral=-1) de densidad 0.
+Rellena la mina de estéril artificial (tipomineral=-2) de densidad default_density, extendiendo a 100*BlockWidthX (o BlockWidthY) metros hacia los lados de la mina, salvo directamente arriba de la mina, donde rellena con aire (tipomineral=-1) de densidad 0.
 '''
 def relleno_mina(mina, default_density,
-                 BlockWidth, BlockHeight, BlockHeightZ,
+                 BlockWidthX, BlockWidthY, BlockHeightZ,
                  cm, cr, cp, P, FTL, R, ley_corte,
                  relleno_lateral=100):
     
@@ -1522,8 +1522,8 @@ def relleno_mina(mina, default_density,
     Z_values = mina['z'].unique()
 
     for i in range(1, relleno_lateral + 1):
-        X_values.update([x_min - i * BlockWidth, x_max + i * BlockWidth])
-        Y_values.update([y_min - i * BlockHeight, y_max + i * BlockHeight])
+        X_values.update([x_min - i * BlockWidthX, x_max + i * BlockWidthX])
+        Y_values.update([y_min - i * BlockWidthY, y_max + i * BlockWidthY])
 
     X_values = sorted(X_values)
     Y_values = sorted(Y_values)
@@ -1570,7 +1570,7 @@ def relleno_mina(mina, default_density,
     mina_rellena.loc[mascara_solo_new_mina, 'id'] = range(inicio_id, inicio_id + mascara_solo_new_mina.sum())
     mina_rellena['id'] = mina_rellena['id'].astype(int)
 
-    Block_Vol = BlockWidth * BlockHeight * BlockHeightZ
+    Block_Vol = BlockWidthX * BlockWidthY * BlockHeightZ
 
     mina_rellena['value'] = np.where(
         mina_rellena['cut']<ley_corte, 
@@ -1585,7 +1585,7 @@ Identifica los puntos de la mina rellena que están dentro del cono especificado
 Minimum_Area es el área mínima inferior de la mina necesario para operar. En caso de que Minimum_Area>0, no se cuentan los bloques que están en elipses del cono que violan esta restricción.
 horizontal_tolerance es un parámetro de tolerancia horizontal de bloques, de modo que se expanden las elipses del cono en horizontal_tolerance metros.
 '''
-def isin_cone(mina_rellena, params_cono, Minimum_Area=0):
+def isin_cone(mina_rellena, params_cono, min_area=0):
     a, b, h, alpha, x_cone, y_cone, z_c  = params_cono
     # z_c = mina_rellena['z'].max()
 
@@ -1609,7 +1609,7 @@ def isin_cone(mina_rellena, params_cono, Minimum_Area=0):
 
     points_in = pd.Series(norm_rel<=z_rel**2, name='isin_cone', index=index_mina_rellena)
 
-    if Minimum_Area > 0:
+    if min_area > 0:
         Z = sorted(mina_rellena['z'].unique())
         Z_rel = (h-z_c+Z)/h
 
@@ -1622,11 +1622,11 @@ def isin_cone(mina_rellena, params_cono, Minimum_Area=0):
 
         Areas_z = np.array(Areas_z)
 
-        if Minimum_Area >= Areas_z.max():
+        if min_area >= Areas_z.max():
             Warning('Valor de Minimum_base_area demasiado alto.')
             return pd.Series()
         
-        index_z_min = np.where(1 - (Areas_z<Minimum_Area))[0].min()
+        index_z_min = np.where(1 - (Areas_z<min_area))[0].min()
 
         z_min = Z[index_z_min]
 
@@ -1641,9 +1641,9 @@ def isin_cone(mina_rellena, params_cono, Minimum_Area=0):
 Calcula el beneficio esperado (sin tiempo) del cono especificado
 '''
 def profit(mina_rellena, params_cono, 
-           Minimum_Area=0, horizontal_tolerance=0):
+           min_area=0, horizontal_tolerance=0):
     in_cone = isin_cone(mina_rellena, params_cono, 
-                                            Minimum_Area=Minimum_Area, 
+                                            min_area=min_area, 
                                             horizontal_tolerance=horizontal_tolerance)
     if in_cone.empty:
         return 0
@@ -1724,7 +1724,7 @@ Busca el mejor cono que se ajusta a la mina maximizando profit utilizando gradie
 Este cono no necesariamente contiene a toda la mina.
 '''
 def Best_Cone_by_Profit_sp_minimize(mina, mina_rellena, max_global_angle=45, 
-                                    Minimum_Area=0, 
+                                    min_area=0, 
                                     method='L-BFGS-B', fd_step=1e-1, ftol=0.01,
                                     x0=[]):
     x_c = mina['x'].mean()
@@ -1769,7 +1769,7 @@ def Best_Cone_by_Profit_sp_minimize(mina, mina_rellena, max_global_angle=45,
             return 1e20
         if (a <= 0) or (b <= 0) or (h <= 0):
             return 1e20
-        return -profit(mina_rellena, params, Minimum_Area=Minimum_Area) + varepsilon*abs(x_cone-x_c)**2 + varepsilon*abs(y_cone-y_c)**2
+        return -profit(mina_rellena, params, min_area=min_area) + varepsilon*abs(x_cone-x_c)**2 + varepsilon*abs(y_cone-y_c)**2
 
     bounds = [(a_low, a_up),
               (b_low, b_up),
@@ -1789,7 +1789,24 @@ def Best_Cone_by_Profit_sp_minimize(mina, mina_rellena, max_global_angle=45,
     print(result)
     return result
 
-def Best_Cone_by_Profit_diff_evol(mina, mina_rellena, max_global_angle=45, Minimum_Area=0, maxiter=1000, popsize=15, init='latinhypercube', strategy='best1bin', mutation=(0.5, 1), recombination=0.7, x0=[]):
+def Best_Cone_by_Profit_diff_evol(mina, mina_rellena, max_global_angle=45, min_area=0, options=dict()):
+
+    options.setdefault('maxiter', 1000)
+    options.setdefault('popsize', 15)
+    options.setdefault('init', 'latinhypercube')
+    options.setdefault('strategy', 'best1bin')
+    options.setdefault('mutation', (0.5, 1))
+    options.setdefault('recombination', 0.7)
+    options.setdefault('x0', [])
+
+    maxiter = options['maxiter']
+    popsize = options['popsize']
+    init = options['init']
+    strategy = options['strategy']
+    mutation = options['mutation']
+    recombination = options['recombination']
+    x0 = options['x0']
+
     
     x_c = mina['x'].mean()
     y_c = mina['y'].mean()
@@ -1831,7 +1848,7 @@ def Best_Cone_by_Profit_diff_evol(mina, mina_rellena, max_global_angle=45, Minim
             return 1e20
         if (a <= 0) or (b <= 0) or (h <= 0):
             return 1e20
-        return -profit(mina_rellena, params, Minimum_Area=Minimum_Area) + varepsilon*abs(x_cone-x_c)**2 + varepsilon*abs(y_cone-y_c)**2
+        return -profit(mina_rellena, params, min_area=min_area) + varepsilon*abs(x_cone-x_c)**2 + varepsilon*abs(y_cone-y_c)**2
     
     bounds = [(a_low, a_up),
               (b_low, b_up),
@@ -1851,7 +1868,7 @@ def Best_Cone_by_Profit_diff_evol(mina, mina_rellena, max_global_angle=45, Minim
 '''
 Identificación de altura mínima de la mina de acuerdo a un criterio de área mínima.
 '''
-def Z_min(mina, cono, Minimum_Area=1e6, debug=False):
+def Z_min(mina, cono, min_area=1e6, debug=False):
     a, b, h, alpha, x_c, y_c, z_c = cono
     Z_values = sorted(mina['z'].unique())
     # z_c = mina['z'].max()
@@ -1863,7 +1880,7 @@ def Z_min(mina, cono, Minimum_Area=1e6, debug=False):
         B = b*z_rel
         if debug:
             print((z, np.pi*A*B))
-        if np.pi*A*B >= Minimum_Area:
+        if np.pi*A*B >= min_area:
             z_min = z
             break
 
@@ -2125,15 +2142,15 @@ def isin_rampa(mina, mina_rellena, rampa, cono, BlockHeightZ,
 
 def total_additional_blocks(mina_rellena, blocks_id, params=dict()):
     
-    params.setdefault('BlockWidth', 10)
-    params.setdefault('BlockHeight', 10)
+    params.setdefault('BlockWidthX', 10)
+    params.setdefault('BlockWidthY', 10)
     params.setdefault('BlockHeightZ', 16)
     params.setdefault('config', '9-points')
     params.setdefault('angulo_apertura_up', 20)
     params.setdefault('angulo_apertura_down', 20)
 
-    BlockWidth = params['BlockWidth']
-    BlockHeight = params['BlockHeight']
+    BlockWidthX = params['BlockWidthX']
+    BlockWidthY = params['BlockWidthY']
     BlockHeightZ = params['BlockHeightZ']
     config = params['config']
     angulo_apertura_up = params['angulo_apertura_up']
@@ -2158,8 +2175,8 @@ def total_additional_blocks(mina_rellena, blocks_id, params=dict()):
     filtro_aire = tm_all != -1
 
     for x_b, y_b, z_b in block_coords:
-        dx = (x_all - x_b) / BlockWidth
-        dy = (y_all - y_b) / BlockHeight
+        dx = (x_all - x_b) / BlockWidthX
+        dy = (y_all - y_b) / BlockWidthY
 
         if config == '5-points':
             dist = np.abs(dx) + np.abs(dy)
@@ -2186,10 +2203,10 @@ def total_additional_blocks(mina_rellena, blocks_id, params=dict()):
 def Best_Ramp_sp(mina, mina_rellena, params_cono, min_area,
                 ancho_rampa, x0=[],
                 ref_rampa=300, angulo_apertura_up=20, angulo_apertura_down=20, config='9-points',
-                BlockWidth=10, BlockHeight=10, BlockHeightZ=16,
+                BlockWidthX=10, BlockWidthY=10, BlockHeightZ=16,
                 method='L-BFGS-B'):
 
-    z_min = Z_min(mina, params_cono, Minimum_Area=min_area)
+    z_min = Z_min(mina, params_cono, min_area=min_area)
 
     bounds = [(-np.pi, np.pi), (0, 0.15), (-1, 1)]
     if len(x0)==0:
@@ -2202,7 +2219,7 @@ def Best_Ramp_sp(mina, mina_rellena, params_cono, min_area,
         id_in_rampa = isin_rampa(mina, mina_rellena, cono=params_cono, BlockHeightZ=BlockHeightZ, rampa=rampa, ancho_rampa=ancho_rampa, ord=np.inf)
 
         all_precedences, all_support = total_additional_blocks(mina_rellena, id_in_rampa,
-                                                  BlockWidth, BlockHeight, BlockHeightZ,
+                                                  BlockWidthX, BlockWidthY, BlockHeightZ,
                                                   config=config, angulo_apertura_up=angulo_apertura_up,
                                                   angulo_apertura_down=angulo_apertura_down)
 
@@ -2221,9 +2238,9 @@ def Best_Ramp_sp(mina, mina_rellena, params_cono, min_area,
 
 def Best_Ramp_diff_evol(mina, mina_rellena, params_cono, min_area, ancho_rampa, x0=[],
                         ref_rampa=500, angulo_apertura_up=20, angulo_apertura_down=20, config='9-points',
-                        BlockWidth=10, BlockHeight=10, BlockHeightZ=16):
+                        BlockWidthX=10, BlockWidthY=10, BlockHeightZ=16):
     
-    z_min = Z_min(mina, params_cono, Minimum_Area=min_area)
+    z_min = Z_min(mina, params_cono, min_area=min_area)
     bounds = [(-np.pi, np.pi), (0, 0.15), (-1, 1)]
 
     def objective(params):
@@ -2233,7 +2250,7 @@ def Best_Ramp_diff_evol(mina, mina_rellena, params_cono, min_area, ancho_rampa, 
         id_in_rampa = isin_rampa(mina, mina_rellena, cono=params_cono, BlockHeightZ=BlockHeightZ, rampa=rampa, ancho_rampa=ancho_rampa, ord=np.inf)
 
         all_precedences, all_support = total_additional_blocks(mina_rellena, id_in_rampa,
-                                                  BlockWidth, BlockHeight, BlockHeightZ,
+                                                  BlockWidthX, BlockWidthY, BlockHeightZ,
                                                   config=config, angulo_apertura_up=angulo_apertura_up,
                                                   angulo_apertura_down=angulo_apertura_down)
 
@@ -2302,8 +2319,8 @@ def Best_Ramp_gp(mina, mina_rellena, params_cono, min_area, ancho_rampa, options
     options.setdefault('angulo_apertura_up', 20)
     options.setdefault('angulo_apertura_down', 20)
     options.setdefault('config', '9-points')
-    options.setdefault('BlockWidth', 10)
-    options.setdefault('BlockHeight', 10)
+    options.setdefault('BlockWidthX', 10)
+    options.setdefault('BlockWidthY', 10)
     options.setdefault('BlockHeightZ', 16)
     options.setdefault('n_calls', 50)
     options.setdefault('random_state', 73)
@@ -2313,15 +2330,15 @@ def Best_Ramp_gp(mina, mina_rellena, params_cono, min_area, ancho_rampa, options
     angulo_apertura_up = options['angulo_apertura_up']
     angulo_apertura_down = options['angulo_apertura_down']
     config = options['config']
-    BlockWidth = options['BlockWidth']
-    BlockHeight = options['BlockHeight']
+    BlockWidthX = options['BlockWidthX']
+    BlockWidthY = options['BlockWidthY']
     BlockHeightZ = options['BlockHeightZ']
     n_calls = options['n_calls']
     random_state = options['random_state']
 
 
 
-    z_min = Z_min(mina, params_cono, Minimum_Area=min_area)
+    z_min = Z_min(mina, params_cono, min_area=min_area)
     z_max = mina['z'].max()
     alpha_z = 0.1
     z_low = (1-alpha_z)*z_min + alpha_z*z_max
@@ -2344,7 +2361,7 @@ def Best_Ramp_gp(mina, mina_rellena, params_cono, min_area, ancho_rampa, options
         id_in_rampa = isin_rampa(mina, mina_rellena, cono=params_cono, BlockHeightZ=BlockHeightZ, rampa=rampa, ancho_rampa=ancho_rampa, ord=np.inf)
 
         all_precedences, all_support = total_additional_blocks(mina_rellena, id_in_rampa,
-                                                  BlockWidth, BlockHeight, BlockHeightZ,
+                                                  BlockWidthX, BlockWidthY, BlockHeightZ,
                                                   config=config, angulo_apertura_up=angulo_apertura_up,
                                                   angulo_apertura_down=angulo_apertura_down)
 
