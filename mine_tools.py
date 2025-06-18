@@ -813,7 +813,7 @@ def Calculate_Similarity_Matrix(FaseBanco, params = dict()):
     tol_ley = params['tolerancia_ley']
     peso_directional_mining = params['peso_direccion_mineria']
     tol_directional_mining = params['tolerancia_direccion_mineria']
-    if (params['vector_mineria']==None) | (peso_directional_mining==0):
+    if (len(params['vector_mineria'])==0) | (peso_directional_mining==0):
         peso_directional_mining = 0
     else:
         P_inicio, P_final = params['vector_mineria']
@@ -1320,7 +1320,7 @@ def Precedencias_Clusters_Agend(FaseBanco, vector_mineria,
     Dic_Precedencias = {}
     adjency_matrix = Calculate_Adjency_Matrix(fase_banco, BlockWidthX, BlockWidthY)
 
-    if vector_mineria == None:
+    if len(vector_mineria) == 0:
         return dict(), fase_banco, Centers, 0
     else:
         P_inicio, P_final = vector_mineria
@@ -1412,13 +1412,16 @@ def Precedencias_Clusters_Angle(FaseBanco, vector_mineria,
     ID_Clusters = fase_banco['cluster'].unique()
     Num_Clusters = len(ID_Clusters)
 
-    P_inicio, P_final = vector_mineria
-    
     t1 = time.time()
     Centers = Centros_Clusters(FaseBanco)
     distancias_al_inicio = {}
     Dic_Precedencias = {}
     adjency_matrix = Calculate_Adjency_Matrix(fase_banco, BlockWidthX, BlockWidthY)
+
+    if len(vector_mineria) == 0:
+        return dict(), fase_banco, Centers, 0
+    else:
+        P_inicio, P_final = vector_mineria
 
     # Calculo de las distancias de los clusters al punto de inicio
     # Distance_Option = True, calcula la distancia proyectando a la recta de dirección de minería
@@ -2505,7 +2508,7 @@ def Clustering(mina, cm=2, cr=0.25, cp=10, P=4, R=0.85, ley_corte=0.142303657862
             y_max = np.max(fase_banco['y'].values)+BlockWidthY
 
             peso_directional_mining_new = peso_directional_mining
-            vector_mineria = None
+            vector_mineria = []
             if peso_directional_mining>0:
                 P1 = ()
                 for p in puntos_iniciales:
