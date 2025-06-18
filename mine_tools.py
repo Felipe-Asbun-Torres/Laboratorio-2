@@ -16,6 +16,8 @@ from skopt import gp_minimize
 from itertools import product
 from functools import partial
 
+from pathlib import Path
+
 
 ###############################################################
 ##################### Plotting Functions ######################
@@ -54,32 +56,32 @@ def plot_mina_3D(mina, column_hue='tipomineral', params=dict()):
     width = params['width']
     height = params['height']
     
-
-    fases_mina = sorted(mina['fase'].unique())
-    for f in fases_mina:
-        mini_mina = mina[mina['fase']==f]
-        fig.add_trace(go.Scatter3d(
-            x=mini_mina['x'],
-            y=mini_mina['y'],
-            z=mini_mina['z'],
-            mode='markers',
-            marker=dict(
-                size=5,
-                color=mini_mina[column_hue],
-                colorscale='rainbow',
-                colorbar=dict(title=column_hue,
-                            x=1.15,
-                            y=0.5,
-                            len=0.75),
-                opacity=opacity_blocks
-            ),
-            hovertemplate=(
-                "ID: %{customdata[0]}<br>" +
-                f"{column_hue}:"+"%{marker.color:.3f}<br>"
-            ),
-            customdata=mini_mina[['id', column_hue]],
-            name=f'Bloques fase {f}'
-        ))
+    if not mina.empty:
+        fases_mina = sorted(mina['fase'].unique())
+        for f in fases_mina:
+            mini_mina = mina[mina['fase']==f]
+            fig.add_trace(go.Scatter3d(
+                x=mini_mina['x'],
+                y=mini_mina['y'],
+                z=mini_mina['z'],
+                mode='markers',
+                marker=dict(
+                    size=5,
+                    color=mini_mina[column_hue],
+                    colorscale='rainbow',
+                    colorbar=dict(title=column_hue,
+                                x=1.15,
+                                y=0.5,
+                                len=0.75),
+                    opacity=opacity_blocks
+                ),
+                hovertemplate=(
+                    "ID: %{customdata[0]}<br>" +
+                    f"{column_hue}:"+"%{marker.color:.3f}<br>"
+                ),
+                customdata=mini_mina[['id', column_hue]],
+                name=f'Bloques fase {f}'
+            ))
 
     Theta = np.linspace(0, 2*np.pi, 50)
     i = 1
@@ -201,33 +203,34 @@ def plot_mina_3D(mina, column_hue='tipomineral', params=dict()):
                     opacity=opacity_blocks**(1/2)
                 ))
 
-    x_all = mina['x']
-    y_all = mina['y']
-    z_all = mina['z']
+    if not mina.empty:
+        x_all = mina['x']
+        y_all = mina['y']
+        z_all = mina['z']
 
-    xrange = x_all.max() - x_all.min()
-    yrange = y_all.max() - y_all.min()
-    zrange = z_all.max() - z_all.min()
-    max_range = max(xrange, yrange, zrange)
+        xrange = x_all.max() - x_all.min()
+        yrange = y_all.max() - y_all.min()
+        zrange = z_all.max() - z_all.min()
+        max_range = max(xrange, yrange, zrange)
 
-    aspectratio = dict(
-        x=xrange / max_range,
-        y=yrange / max_range,
-        z=(zrange / max_range)*z_ratio
-    )
+        aspectratio = dict(
+            x=xrange / max_range,
+            y=yrange / max_range,
+            z=(zrange / max_range)*z_ratio
+        )
 
-    fig.update_layout(
-        scene=dict(
-            xaxis_title='X',
-            yaxis_title='Y',
-            zaxis_title='Z',
-            aspectmode='manual',
-            aspectratio=aspectratio
-        ),
-        title=f'Puntos 3D con Color según {column_hue}',
-        width=width,
-        height=height
-    )
+        fig.update_layout(
+            scene=dict(
+                xaxis_title='X',
+                yaxis_title='Y',
+                zaxis_title='Z',
+                aspectmode='manual',
+                aspectratio=aspectratio
+            ),
+            title=f'Puntos 3D con Color según {column_hue}',
+            width=width,
+            height=height
+        )
 
     
     buttons = []
@@ -571,6 +574,7 @@ def plot_fase_banco(FaseBanco, column_hue='cut', text_hue=None, params=dict()):
     
     fase = FaseBanco['fase'].values[0]
     z = FaseBanco['z'].values[0]
+    banco = FaseBanco['banco'].values[0]
 
     col_data = FaseBanco[column_hue]
     if column_hue in variables_continuas:
@@ -684,9 +688,11 @@ def plot_fase_banco(FaseBanco, column_hue='cut', text_hue=None, params=dict()):
 
     if save_as_image:
         if path_to_save=='':
-            path_to_save = f'fase_{fase}_banco_{z}.png'
+            path_to_save = Path(f'fase_{fase}_banco_{banco}.png')
         else:
-            path_to_save = path_to_save + f'/fase_{fase}_banco_{z}.png'
+            path_to_save = Path(path_to_save + f'fase_{fase}_banco_{banco}.png')
+
+        path_to_save.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(path_to_save, bbox_inches='tight')
         plt.close(fig)
     else:
@@ -807,7 +813,7 @@ def Calculate_Similarity_Matrix(FaseBanco, params = dict()):
     tol_ley = params['tolerancia_ley']
     peso_directional_mining = params['peso_direccion_mineria']
     tol_directional_mining = params['tolerancia_direccion_mineria']
-    if params['vector_mineria']==None:
+    if (params['vector_mineria']==None) | (peso_directional_mining==0):
         peso_directional_mining = 0
     else:
         P_inicio, P_final = params['vector_mineria']
@@ -1306,13 +1312,18 @@ def Precedencias_Clusters_Agend(FaseBanco, vector_mineria,
     ID_Clusters = fase_banco['cluster'].unique()
     Num_Clusters = len(ID_Clusters)
 
-    P_inicio, P_final = vector_mineria
+    
     
     t1 = time.time()
     Centers = Centros_Clusters(FaseBanco)
     distancias_al_inicio = {}
     Dic_Precedencias = {}
     adjency_matrix = Calculate_Adjency_Matrix(fase_banco, BlockWidthX, BlockWidthY)
+
+    if vector_mineria == None:
+        return dict(), fase_banco, Centers, 0
+    else:
+        P_inicio, P_final = vector_mineria
 
     # Calculo de las distancias de los clusters al punto de inicio
     # Distance_Option = True, calcula la distancia proyectando a la recta de dirección de minería
@@ -1640,11 +1651,8 @@ def isin_cone(mina_rellena, params_cono, min_area=0):
 '''
 Calcula el beneficio esperado (sin tiempo) del cono especificado
 '''
-def profit(mina_rellena, params_cono, 
-           min_area=0, horizontal_tolerance=0):
-    in_cone = isin_cone(mina_rellena, params_cono, 
-                                            min_area=min_area, 
-                                            horizontal_tolerance=horizontal_tolerance)
+def profit(mina_rellena, params_cono, min_area=0):
+    in_cone = isin_cone(mina_rellena, params_cono, min_area=min_area)
     if in_cone.empty:
         return 0
     
@@ -1887,86 +1895,11 @@ def Z_min(mina, cono, min_area=1e6, debug=False):
     return z_min
 
 
-# def Rampa(cono, params_rampa, z_min=None, n=300, max_vueltas=3):
-#     if cono is None or len(cono)==0:
-#         raise Exception('Debe adjuntar cono')
-    
-#     theta_0, descenso, orientacion, z_switchback = params_rampa
-
-#     if orientacion >= 0:
-#         orientacion = 1
-#     else:
-#         orientacion = -1
-
-#     Angulo_Descenso = np.arcsin(descenso)
-#     t_final=2*max_vueltas*np.pi
-
-#     p = -np.sin(Angulo_Descenso)
-#     a, b, h, x_cone, y_cone, alpha_cone, z_c = cono
-
-#     T = np.linspace(0, t_final, n)
-#     X_curve = []
-#     Y_curve = []
-#     Z_curve = []
-
-#     z = z_c
-#     theta = theta_0
-
-#     x = (a*np.cos(theta_0)*np.cos(alpha_cone) - b*np.sin(theta_0)*np.sin(alpha_cone)) + x_cone
-#     y = (a*np.cos(theta_0)*np.sin(alpha_cone) + b*np.sin(theta_0)*np.cos(alpha_cone)) + y_cone
-
-#     X_curve.append(x)
-#     Y_curve.append(y)
-#     Z_curve.append(z)
-    
-#     stop = False
-
-#     for t in T:
-#         if t == 0:
-#             t0 = 0
-#         else:
-#             R_1 = a*np.cos(theta)*np.cos(alpha_cone) - b*np.sin(theta)*np.sin(alpha_cone)
-#             dR_1 = (-a*np.sin(theta)*np.cos(alpha_cone) - b*np.cos(theta)*np.sin(alpha_cone))*orientacion
-#             R_2 = a*np.cos(theta)*np.sin(alpha_cone) + b*np.sin(theta)*np.cos(alpha_cone)
-#             dR_2 = (-a*np.sin(theta)*np.sin(alpha_cone) + b*np.cos(theta)*np.cos(alpha_cone))*orientacion
-
-#             A = p**2 - 1 + p**2 * R_1**2/h**2 + p**2 * R_2**2/h**2
-#             B = (2*p**2/h)*(R_1*dR_1 + R_2*dR_2)*(1-z_c/h + z/h)
-#             C = p**2*(dR_1**2 + dR_2**2)*(1 - z_c/h + z/h)**2
-
-#             dz = ((-B) + np.sqrt( B**2 - 4*A*C ))/(2*A)
-
-#             z_new = z + (t-t0)*dz
-#             theta_new = theta_0 + orientacion*t
-            
-
-#             x = (a*np.cos(theta_new)*np.cos(alpha_cone) - b*np.sin(theta_new)*np.sin(alpha_cone))*(1-z_c/h+z_new/h) + x_cone
-#             y = (a*np.cos(theta_new)*np.sin(alpha_cone) + b*np.sin(theta_new)*np.cos(alpha_cone))*(1-z_c/h+z_new/h) + y_cone
-
-#             X_curve.append(x)
-#             Y_curve.append(y)
-#             Z_curve.append(z_new)
-
-#             t0 = t
-#             z = z_new
-#             theta = theta_new
-
-#             if stop:
-#                 break
-
-#             if z_min:
-#                 if z_new < z_min:
-#                     stop = True
-            
-#     return X_curve, Y_curve, Z_curve
-
-
-
 '''
 Creación de rampa embebida en el cono con cierta pendiente de descenso y ángulo inicial.
 '''
-def Rampa(cono, params_rampa, n=300, max_vueltas=3, ancho_rampa=0, z_min=None):
-    theta_0, descenso, orientacion, z_switchback = params_rampa
+def Rampa(cono, params_rampa, n=300, max_vueltas=3, ancho_rampa=0, z_min=None, separacion_switchback=2):
+    theta_0, descenso, orientacion, z_switchback, switchback_mode = params_rampa
 
     if orientacion >= 0:
         orientacion = 1
@@ -1979,10 +1912,13 @@ def Rampa(cono, params_rampa, n=300, max_vueltas=3, ancho_rampa=0, z_min=None):
     p = -np.sin(Angulo_Descenso)
     a, b, h, alpha_cone, x_cone, y_cone, z_c = cono
 
-    if z_switchback:
-        a += 2*ancho_rampa
-        b += 2*ancho_rampa
-        
+    if switchback_mode:
+        a += separacion_switchback*ancho_rampa*((1-z_c/h+z_switchback/h)**(-1))
+        b += separacion_switchback*ancho_rampa*((1-z_c/h+z_switchback/h)**(-1))
+        # a+=separacion_switchback*ancho_rampa
+        # b+=separacion_switchback*ancho_rampa
+
+
     T = np.linspace(0, t_final, n)
     X_curve = []
     Y_curve = []
@@ -2018,13 +1954,15 @@ def Rampa(cono, params_rampa, n=300, max_vueltas=3, ancho_rampa=0, z_min=None):
             z_new = z + (t-t0)*dz
             theta_new = theta_0 + orientacion*t
 
-            if z_switchback:
+            if switchback_mode:
                 if z_new<z_switchback:
                     orientacion *= -1
                     a_before = a
                     b_before = b
-                    a -= 2*ancho_rampa
-                    b -= 2*ancho_rampa
+                    a -= separacion_switchback*ancho_rampa*((1-z_c/h+z_switchback/h)**(-1))
+                    b -= separacion_switchback*ancho_rampa*((1-z_c/h+z_switchback/h)**(-1))
+                    # a-=separacion_switchback*ancho_rampa
+                    # b-=separacion_switchback*ancho_rampa
 
                     S = np.linspace(0, 1, 10)[:-1]
                     x_before = (a_before*np.cos(theta_new)*np.cos(alpha_cone) - b_before*np.sin(theta_new)*np.sin(alpha_cone))*(1-z_c/h+z_new/h) + x_cone
@@ -2054,7 +1992,7 @@ def Rampa(cono, params_rampa, n=300, max_vueltas=3, ancho_rampa=0, z_min=None):
                     z_switchback = None
                     
                     cono_sw = [a*(1-z_c/h+z_new/h), b*(1-z_c/h+z_new/h), h-(z_c-z_new), alpha_cone, x_cone, y_cone, z_new]
-                    params_rampa_sw = [theta_new, descenso, orientacion, None]
+                    params_rampa_sw = [theta_new, descenso, orientacion, None, False]
 
                     X, Y, Z = Rampa(cono_sw, params_rampa_sw, n=300, z_min=z_min, max_vueltas=3)
                     X_curve = X_curve + X
@@ -2348,22 +2286,27 @@ def Best_Ramp_gp(mina, mina_rellena, params_cono, min_area, ancho_rampa, options
         Real(0.05, 0.15, name='descenso'),
         Real(-1, 1, name='orientacion'),
         Real(z_low, z_top, name='z_switchback'),
-        Categorical(['none', 'value'], name='switchback_mode')
+        Categorical([False, True], name='switchback_mode')
     ]
 
     def objective(params):
-        z_switchback, switchback_mode = params[3], params[4]
-        z_switchback = None if switchback_mode == 'none' else z_switchback
-        params_rampa = (params[0], params[1], params[2], z_switchback)
+        # z_switchback, switchback_mode = params[3], params[4]
+        # z_switchback = None if switchback_mode == 'none' else z_switchback
+        # params_rampa = (params[0], params[1], params[2], z_switchback)
 
-        rampa = Rampa(params_cono, params_rampa, n=ref_rampa, ancho_rampa=ancho_rampa, z_min=z_min)
+        rampa = Rampa(params_cono, params, n=ref_rampa, ancho_rampa=ancho_rampa, z_min=z_min)
 
         id_in_rampa = isin_rampa(mina, mina_rellena, cono=params_cono, BlockHeightZ=BlockHeightZ, rampa=rampa, ancho_rampa=ancho_rampa, ord=np.inf)
 
         all_precedences, all_support = total_additional_blocks(mina_rellena, id_in_rampa,
-                                                  BlockWidthX, BlockWidthY, BlockHeightZ,
-                                                  config=config, angulo_apertura_up=angulo_apertura_up,
-                                                  angulo_apertura_down=angulo_apertura_down)
+                                                               params={
+                                                                   'BlockWidthX': BlockWidthX,
+                                                                   'BlockWidthY': BlockWidthY,
+                                                                   'BlockHeightZ': BlockHeightZ,
+                                                                   'config': config,
+                                                                   'angulo_apertura_up': angulo_apertura_up,
+                                                                   'angulo_apertura_down': angulo_apertura_down
+                                                               })
 
         total_ids = (set(mina['id']) | all_precedences) - all_support
         mina_con_rampa = mina_rellena[mina_rellena['id'].isin(total_ids)]
@@ -2380,10 +2323,7 @@ def Best_Ramp_gp(mina, mina_rellena, params_cono, min_area, ancho_rampa, options
     )
 
     print("Mejor solución encontrada:")
-    print("θ (rad):", result.x[0])
-    print("Descenso:", result.x[1])
-    print("Orientación:", result.x[2])
-    print('Switchback:', result.x[3])
+    print('[θ, descenso, orientacion, z_switchback, switchback_mode] = ', result.x)
     print("Valor objetivo:", result.fun)
 
     return result
@@ -2425,3 +2365,323 @@ def Puntos_Iniciales(mina, rampa,
         counter+=1
     
     return puntos_iniciales
+
+
+def Clustering(mina, cm=2, cr=0.25, cp=10, P=4, R=0.85, ley_corte=0.1423036578621615,
+               options=dict()):
+    if mina.empty:
+        raise ValueError('Inserte un dataframe "mina" no vacio.')
+    
+    if not('destino' in mina.columns):
+        mina['destino'] = [1 if mina.iloc[i]['cut']>= ley_corte else 0 for i in range(len(mina))]
+
+    options.setdefault('BlockWidthX', 10)
+    options.setdefault('BlockWidthY', 10)
+    options.setdefault('BlockHeightZ', 16)
+    options.setdefault('area_minima_operativa', np.pi*80*80)
+
+    options.setdefault('refinamiento_rampa', 300)
+    options.setdefault('ancho_rampa', 30)
+
+    options.setdefault('peso_distancia', 2)
+    options.setdefault('peso_ley', 0)
+    options.setdefault('tolerancia_ley', 0.001)
+    options.setdefault('peso_direccion_mineria', 0.25)
+    options.setdefault('tolerancia_direccion_mineria', 0.001)
+    options.setdefault('penalizacion_destino', 0.9)
+    options.setdefault('penalizacion_roca', 0.9)
+
+    options.setdefault('tamaño_maximo_cluster', 0.1)
+    options.setdefault('tamaño_promedio_cluster', 0.075)
+    options.setdefault('tamaño_minimo_cluster', 0.01)
+    options.setdefault('tolerancia_tamaño_maximo_cluster', 10)
+    options.setdefault('tolerancia_tamaño_minimo_cluster', 5)
+
+    options.setdefault('Shape_Refinement', 'Tabesh') # None, 'Tabesh' o 'Modificado'
+    options.setdefault('Iteraciones_Shape_Refinement', 5)
+
+    options.setdefault('save', True)
+    options.setdefault('save_images', True)
+    options.setdefault('path_save', 'Clusterizacion/Resultados/')
+    options.setdefault('path_save_images', 'Clusterizacion/Imagenes/')
+    options.setdefault('path_params', 'Clusterizacion/Params/')
+
+    BlockWidthX = options['BlockWidthX']
+    BlockWidthY = options['BlockWidthY']
+    BlockHeightZ = options['BlockHeightZ']
+    area_minima_operativa = options['area_minima_operativa']
+
+    ancho_rampa = options['ancho_rampa']
+    ref_ramp = options['refinamiento_rampa']
+
+    
+    peso_distancia = options['peso_distancia']
+    peso_ley = options['peso_ley']
+    tol_ley = options['tolerancia_ley']
+    peso_directional_mining = options['peso_direccion_mineria']
+    tol_directional_mining = options['tolerancia_direccion_mineria']
+    penalizacion_destino = options['penalizacion_destino']
+    penalizacion_roca = options['penalizacion_roca']
+
+    
+    if options['tamaño_maximo_cluster'] <= 1:
+        Max_Cluster_Length_multiplier = options['tamaño_maximo_cluster']
+        max_cluster_mode = True
+    else:
+        Max_Cluster_Length_st = int(options['tamaño_maximo_cluster'])
+        max_cluster_mode = False
+    
+    if options['tamaño_promedio_cluster'] <= 1:
+        Average_Cluster_Length_multiplier = options['tamaño_promedio_cluster']
+        average_cluster_mode = True
+    else:
+        Average_Cluster_Length_st = int(options['tamaño_promedio_cluster'])
+        average_cluster_mode = False
+    
+    if options['tamaño_minimo_cluster'] <= 1:
+        Min_Cluster_Length_multiplier = options['tamaño_minimo_cluster']
+        min_cluster_mode = True
+    else:
+        Min_Cluster_Length_st = int(options['tamaño_minimo_cluster'])
+        min_cluster_mode = False
+
+    Iterations_PostProcessing = options['Iteraciones_Shape_Refinement']
+
+    save = options['save']
+    save_images = options['save_images']
+    path_save = options['path_save']
+    path_params = options['path_params']
+    path_save_images = options['path_save_images']
+
+
+    # options.setdefault('cm', 2)
+    # cm = options['cm']
+    # options.setdefault('cr', 0.25)
+    # cr = options['cr']
+    # options.setdefault('cp', 10)
+    # cp = options['cp']
+    # options.setdefault('P', 4)
+    # P = options['P']
+    # options.setdefault('R', 0.85)
+    # R = options['R']
+    # FTL = 2204.62
+    # options.setdefault('ley_corte', 0.1423036578621615)   # Ley Corte Marginal con los valores default
+    # ley_corte = options['ley_corte']
+    
+
+
+    print(f'---------Ley de corte usada: {ley_corte}---------\n')
+    fases_mina = sorted(mina['fase'].unique())
+    Tamaños_fase_banco = []
+    Tiempos_clusterizacion_fase_banco = []
+
+    contador_bancos = 1
+    contador_clusters = 0
+
+    Diccionario_Centros = dict()
+
+    for fase in fases_mina:
+        mini_mina = mina[mina['fase'] == fase]
+        bancos = sorted(mini_mina['banco'].unique())
+
+        if peso_directional_mining > 0:
+            cono = list( np.load(Path(path_params + f'cono_{fase}.npy')) )
+            params_rampa = list( np.load(Path(path_params + f'rampa_{fase}.npy')) )
+
+            z_min = Z_min(mini_mina, cono, area_minima_operativa)
+            rampa = Rampa(cono, params_rampa, n=ref_ramp, z_min=z_min, ancho_rampa=ancho_rampa)
+
+            puntos_iniciales = Puntos_Iniciales(mini_mina, rampa, z_min)
+
+        for banco in bancos:
+            print(f'\n')
+            print(f'Fase-Banco N° {fase}-{banco}')
+            fase_banco = mina[(mina['fase'] == fase) & (mina['banco'] == banco)].copy()
+            z_fb = fase_banco['z'].values[0]
+
+            x_min = np.min(fase_banco['x'].values)-BlockWidthX
+            y_min = np.min(fase_banco['y'].values)-BlockWidthY
+            x_max = np.max(fase_banco['x'].values)+BlockWidthX
+            y_max = np.max(fase_banco['y'].values)+BlockWidthY
+
+            peso_directional_mining_new = peso_directional_mining
+            vector_mineria = None
+            if peso_directional_mining>0:
+                P1 = ()
+                for p in puntos_iniciales:
+                    if p[2]==z_fb:
+                        P1 = (p[0], p[1])
+                        alpha = (p[0] - x_min)/(x_max - x_min)
+                        beta = (p[1] - y_min)/(y_max - y_min)
+                        P2 = ( alpha*x_min + (1-alpha)*x_max, beta*y_min + (1-beta)*y_max)
+                        vector_mineria = (P1, P2)
+                        break
+
+                if len(P1)==0:
+                    # p = puntos_iniciales[0]
+                    # P1 = (p[0], p[1])
+                    # alpha = (p[0] - x_min)/(x_max - x_min)
+                    # beta = (p[1] - y_min)/(y_max - y_min)
+                    # P2 = (alpha*x_min + (1-alpha)*x_max, beta*y_min + (1-beta)*y_max)
+                    peso_directional_mining_new = 0
+
+
+            tamaño_fase_banco = len(fase_banco)
+            Tamaños_fase_banco.append(tamaño_fase_banco)
+            print(f'Tamaño de la fase-banco: {tamaño_fase_banco}')
+            
+
+            adjency_matrix = Calculate_Adjency_Matrix(fase_banco, BlockWidthX, BlockWidthY)
+            similarity_matrix = Calculate_Similarity_Matrix(
+                fase_banco, 
+                params={
+                    'peso_distancia': peso_distancia,
+                    'peso_ley': peso_ley,
+                    'tolerancia_ley': tol_ley,
+                    'peso_direccion_mineria': peso_directional_mining_new,
+                    'tolerancia_direccion_mineria': tol_directional_mining,
+                    'vector_mineria': vector_mineria,
+                    'penalizacion_destino': penalizacion_destino,
+                    'penalizacion_roca': penalizacion_roca
+                }
+                )
+            
+            if max_cluster_mode:
+                Max_Cluster_Length = int(Max_Cluster_Length_multiplier*tamaño_fase_banco)
+            else:
+                Max_Cluster_Length = Max_Cluster_Length_st
+            if average_cluster_mode:
+                Average_Cluster_Length = int(Average_Cluster_Length_multiplier*tamaño_fase_banco)
+            else:
+                Average_Cluster_Length = Average_Cluster_Length_st
+            if min_cluster_mode:
+                Min_Cluster_Length = int(Min_Cluster_Length_multiplier*tamaño_fase_banco)
+            else:
+                Min_Cluster_Length = Min_Cluster_Length_st
+
+            if Max_Cluster_Length==0:
+                mult = 2/3
+            else:
+                mult = Average_Cluster_Length/Max_Cluster_Length
+
+            # Max_Cluster_Length = int(0.1*tamaño_fase_banco)
+            # Average_Length_Cluster = int((2/3)*Max_Cluster_Length)
+            # Min_Cluster_Length = int(0.01*tamaño_fase_banco)
+
+            if Max_Cluster_Length < options['tolerancia_tamaño_maximo_cluster']:
+                Max_Cluster_Length = options['tolerancia_tamaño_maximo_cluster']
+                Average_Cluster_Length = int(mult*Max_Cluster_Length)
+            if Min_Cluster_Length < options['tolerancia_tamaño_minimo_cluster']:
+                Min_Cluster_Length = options['tolerancia_tamaño_minimo_cluster']
+
+            print(f'MaxCL: {Max_Cluster_Length}, AveCL: {Average_Cluster_Length}, MinCL: {Min_Cluster_Length}')
+
+            fase_banco, execution_time_agg, N_Clusters_agg = Clustering_Tabesh(
+                fase_banco, adjency_matrix, similarity_matrix,
+                params={'Average_Length_Cluster': Average_Cluster_Length,
+                        'Max_Length_Cluster': Max_Cluster_Length}
+                )
+            
+            execution_time_ref = 0
+            N_Clusters_ref = N_Clusters_agg
+            if options['Shape_Refinement']=='Tabesh':
+                fase_banco, execution_time_ref, N_Clusters_ref = Shape_Refinement_Tabesh(
+                    fase_banco,
+                    adjency_matrix,
+                    Min_Cluster_Length=Min_Cluster_Length,
+                    Iterations_PostProcessing=Iterations_PostProcessing
+                )
+            elif options['Shape_Refinement']=='Modificado':
+                fase_banco, execution_time_ref, N_Clusters_ref = Shape_Refinement_Mod(
+                    fase_banco,
+                    adjency_matrix,
+                    Min_Cluster_Length=Min_Cluster_Length,
+                    Iterations_PostProcessing=Iterations_PostProcessing
+                )
+            
+            Clusters_Ordenados, fase_banco, Centers, execution_time_prec = Precedencias_Clusters_Agend(fase_banco, vector_mineria, BlockWidthX, BlockWidthY, Distance_Option=True)
+
+            Diccionario_Centros[(fase, banco)] = Centers
+
+            ru, ru_distribution = Rock_Unity(fase_banco)
+            ddf, ddf_distribution = Destination_Dilution_Factor(fase_banco)
+            cv, cv_distribution = Coefficient_Variation(fase_banco)
+
+            if contador_bancos == 1:
+                mina_clusterizada = fase_banco.copy()
+                metrics_df = pd.DataFrame(
+                    {'fase': fase, 
+                    'banco': banco, 
+                    'RU': ru, 
+                    'DDF': ddf, 
+                    'CV': cv, 
+                    'RU_dist': [ru_distribution],
+                    'DDF_dist': [ddf_distribution],
+                    'CV_dist': [cv_distribution]}
+                    )
+                precedences_df = pd.DataFrame({'fase': fase, 'banco': banco, 'cluster': [int(k) for k in Clusters_Ordenados.keys()], 'precedences': [[int(x) for x in v] for v in Clusters_Ordenados.values()]})
+            else:
+                mina_clusterizada = pd.concat([mina_clusterizada, fase_banco], ignore_index=True)
+                metrics_df = pd.concat(
+                    [metrics_df, 
+                    pd.DataFrame(
+                        {'fase': fase, 
+                        'banco': banco, 
+                        'RU': ru, 
+                        'DDF': ddf, 
+                        'CV': cv, 
+                        'RU_dist': [ru_distribution],
+                        'DDF_dist': [ddf_distribution],
+                        'CV_dist': [cv_distribution]}
+                    )], 
+                    ignore_index=True)
+
+                precedences_df = pd.concat(
+                    [precedences_df, 
+                    pd.DataFrame(
+                        {'fase': fase, 
+                        'banco': banco, 
+                        'cluster': [int(k) for k in Clusters_Ordenados.keys()], 
+                        'precedences': [[int(x) for x in v] for v in Clusters_Ordenados.values()]}
+                        )], 
+                    ignore_index=True)
+
+            contador_bancos += 1
+            contador_clusters += N_Clusters_ref
+            tiempo_ejecucion = execution_time_agg + execution_time_ref + execution_time_prec
+            Tiempos_clusterizacion_fase_banco.append(tiempo_ejecucion)
+
+            if save_images:
+                path_image = path_save_images
+                
+
+                plot_fase_banco(fase_banco, column_hue='cluster', params={
+                    'BlockWidthX': BlockWidthX,
+                    'BlockWidthY': BlockWidthY,
+                    'dpi': 150,
+                    'flechas': [vector_mineria] if len(vector_mineria)>0 else [],
+                    'precedencias': Clusters_Ordenados,
+                    'centros': Centers,
+                    'guardar_imagen': True,
+                    'path': path_image
+                })
+            
+    print(f'Clusters creados: {contador_clusters}')
+    print(f'Tiempo total de ejecucion: {sum(Tiempos_clusterizacion_fase_banco)}')
+
+    if save:
+        path_arch = Path(path_save + 'mina_clusterizada.csv')
+        path_arch.parent.mkdir(parents=True, exist_ok=True)
+
+        mina_clusterizada.to_csv(path_arch, index=False)
+        metrics_df.to_csv(Path(path_save + 'metricas.csv'), index=False)
+        precedences_df.to_csv(Path(path_save + 'precedencias.csv'), index=False)
+
+        sizes = np.array(Tamaños_fase_banco)
+        pd.DataFrame(sizes).to_csv(Path(path_save + 'sizes.csv'), index=False)
+
+        times = np.array(Tiempos_clusterizacion_fase_banco)
+        pd.DataFrame(times).to_csv(Path(path_save + 'execution_times.csv'), index=False)
+    
+
+    return mina_clusterizada
