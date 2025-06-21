@@ -619,12 +619,27 @@ def plot_fase_banco(FaseBanco, column_hue='cut', text_hue=None, params=dict()):
             ax.text(x_center, y_center, str(block_text), ha='center', va='center', fontsize=8, color='black')
     
 
-    x_min = FaseBanco['x'].min() - 5*BlockWidthX
-    x_max = FaseBanco['x'].max() + 5*BlockWidthY
-    ax.set_xlim(x_min, x_max)
+    x_vals = [FaseBanco['x'].min(), FaseBanco['x'].max()]
+    y_vals = [FaseBanco['y'].min(), FaseBanco['y'].max()]
 
-    y_min = FaseBanco['y'].min() - 5*BlockWidthX
-    y_max = FaseBanco['y'].max() + 5*BlockWidthY
+    for arrow in arrows:
+        P1, P2 = arrow
+        x_vals.extend([P1[0], P2[0]])
+        y_vals.extend([P1[1], P2[1]])
+
+    for p in points:
+        x_vals.append(p[0])
+        y_vals.append(p[1])
+
+    margin_x = 5 * BlockWidthX
+    margin_y = 5 * BlockWidthY
+
+    x_min = min(x_vals) - margin_x
+    x_max = max(x_vals) + margin_x
+    y_min = min(y_vals) - margin_y
+    y_max = max(y_vals) + margin_y
+
+    ax.set_xlim(x_min, x_max)
     ax.set_ylim(y_min, y_max)
 
     ax.set_aspect('equal', adjustable='box')
@@ -1882,7 +1897,6 @@ Identificación de altura mínima de la mina de acuerdo a un criterio de área m
 def Z_min(mina, cono, min_area=1e6, debug=False):
     a, b, h, alpha, x_c, y_c, z_c = cono
     Z_values = sorted(mina['z'].unique())
-    # z_c = mina['z'].max()
 
     z_min = z_c
     for z in Z_values:
@@ -1898,28 +1912,44 @@ def Z_min(mina, cono, min_area=1e6, debug=False):
     return z_min
 
 
+def Longitud_Rampa(rampa):
+    X = np.array(rampa[0])
+    Y = np.array(rampa[1])
+    Z = np.array(rampa[2])
+
+
+    dX = X[1:] - X[:-1]
+    dY = Y[1:] - Y[:-1]
+    dZ = Z[1:] - Z[:-1]
+
+
+    length = np.sum(np.sqrt(dX**2 + dY**2 + dZ**2))
+
+    return length
+
+
 '''
 Creación de rampa embebida en el cono con cierta pendiente de descenso y ángulo inicial.
 '''
-def Rampa(cono, params_rampa, n=300, max_vueltas=3, ancho_rampa=0, z_min=None, separacion_switchback=2):
-    theta_0, descenso, orientacion, z_switchback, switchback_mode = params_rampa
+def Rampa(cono, params_rampa, n=500, max_vueltas=5, ancho_rampa=30, z_min=None, separacion_switchback=2, return_final_theta=False):
+    
+    theta_0, descenso, orientacion, z_switchback, switchback_mode, lambda_switchback = params_rampa
 
     if orientacion >= 0:
         orientacion = 1
     else:
         orientacion = -1
 
-    Angulo_Descenso = np.arcsin(descenso)
     t_final = 2*max_vueltas*np.pi
 
-    p = -np.sin(Angulo_Descenso)
+    p = -descenso
     a, b, h, alpha_cone, x_cone, y_cone, z_c = cono
 
     if switchback_mode:
-        a += separacion_switchback*ancho_rampa*((1-z_c/h+z_switchback/h)**(-1))
-        b += separacion_switchback*ancho_rampa*((1-z_c/h+z_switchback/h)**(-1))
-        # a+=separacion_switchback*ancho_rampa
-        # b+=separacion_switchback*ancho_rampa
+        a_ext = a + (1-lambda_switchback)*separacion_switchback*ancho_rampa*((1-z_c/h+z_switchback/h)**(-1))
+        b_ext = b + (1-lambda_switchback)*separacion_switchback*ancho_rampa*((1-z_c/h+z_switchback/h)**(-1))
+        a_int = a - (lambda_switchback)*separacion_switchback*ancho_rampa*((1-z_c/h+z_switchback/h)**(-1))
+        b_int = b - (lambda_switchback)*separacion_switchback*ancho_rampa*((1-z_c/h+z_switchback/h)**(-1))
 
 
     T = np.linspace(0, t_final, n)
@@ -1930,8 +1960,12 @@ def Rampa(cono, params_rampa, n=300, max_vueltas=3, ancho_rampa=0, z_min=None, s
     z = z_c
     theta = theta_0
 
-    x = (a*np.cos(theta_0)*np.cos(alpha_cone) - b*np.sin(theta_0)*np.sin(alpha_cone)) + x_cone
-    y = (a*np.cos(theta_0)*np.sin(alpha_cone) + b*np.sin(theta_0)*np.cos(alpha_cone)) + y_cone
+    if switchback_mode:
+        x = (a_ext*np.cos(theta_0)*np.cos(alpha_cone) - b_ext*np.sin(theta_0)*np.sin(alpha_cone)) + x_cone
+        y = (a_ext*np.cos(theta_0)*np.sin(alpha_cone) + b_ext*np.sin(theta_0)*np.cos(alpha_cone)) + y_cone
+    else:
+        x = (a*np.cos(theta_0)*np.cos(alpha_cone) - b*np.sin(theta_0)*np.sin(alpha_cone)) + x_cone
+        y = (a*np.cos(theta_0)*np.sin(alpha_cone) + b*np.sin(theta_0)*np.cos(alpha_cone)) + y_cone
 
     X_curve.append(x)
     Y_curve.append(y)
@@ -1943,10 +1977,16 @@ def Rampa(cono, params_rampa, n=300, max_vueltas=3, ancho_rampa=0, z_min=None, s
         if t == 0:
             t0 = 0
         else:
-            R_1 = a*np.cos(theta)*np.cos(alpha_cone) - b*np.sin(theta)*np.sin(alpha_cone)
-            dR_1 = (-a*np.sin(theta)*np.cos(alpha_cone) - b*np.cos(theta)*np.sin(alpha_cone))*orientacion
-            R_2 = a*np.cos(theta)*np.sin(alpha_cone) + b*np.sin(theta)*np.cos(alpha_cone)
-            dR_2 = (-a*np.sin(theta)*np.sin(alpha_cone) + b*np.cos(theta)*np.cos(alpha_cone))*orientacion
+            if switchback_mode:
+                R_1 = a_ext*np.cos(theta)*np.cos(alpha_cone) - b_ext*np.sin(theta)*np.sin(alpha_cone)
+                dR_1 = (-a_ext*np.sin(theta)*np.cos(alpha_cone) - b_ext*np.cos(theta)*np.sin(alpha_cone))*orientacion
+                R_2 = a_ext*np.cos(theta)*np.sin(alpha_cone) + b_ext*np.sin(theta)*np.cos(alpha_cone)
+                dR_2 = (-a_ext*np.sin(theta)*np.sin(alpha_cone) + b_ext*np.cos(theta)*np.cos(alpha_cone))*orientacion
+            else:
+                R_1 = a*np.cos(theta)*np.cos(alpha_cone) - b*np.sin(theta)*np.sin(alpha_cone)
+                dR_1 = (-a*np.sin(theta)*np.cos(alpha_cone) - b*np.cos(theta)*np.sin(alpha_cone))*orientacion
+                R_2 = a*np.cos(theta)*np.sin(alpha_cone) + b*np.sin(theta)*np.cos(alpha_cone)
+                dR_2 = (-a*np.sin(theta)*np.sin(alpha_cone) + b*np.cos(theta)*np.cos(alpha_cone))*orientacion
 
             A = p**2 - 1 + p**2 * R_1**2/h**2 + p**2 * R_2**2/h**2
             B = (2*p**2/h)*(R_1*dR_1 + R_2*dR_2)*(1-z_c/h + z/h)
@@ -1960,18 +2000,147 @@ def Rampa(cono, params_rampa, n=300, max_vueltas=3, ancho_rampa=0, z_min=None, s
             if switchback_mode:
                 if z_new<z_switchback:
                     orientacion *= -1
-                    a_before = a
-                    b_before = b
-                    a -= separacion_switchback*ancho_rampa*((1-z_c/h+z_switchback/h)**(-1))
-                    b -= separacion_switchback*ancho_rampa*((1-z_c/h+z_switchback/h)**(-1))
-                    # a-=separacion_switchback*ancho_rampa
-                    # b-=separacion_switchback*ancho_rampa
 
-                    S = np.linspace(0, 1, 10)[:-1]
-                    x_before = (a_before*np.cos(theta_new)*np.cos(alpha_cone) - b_before*np.sin(theta_new)*np.sin(alpha_cone))*(1-z_c/h+z_new/h) + x_cone
-                    y_before = (a_before*np.cos(theta_new)*np.sin(alpha_cone) + b_before*np.sin(theta_new)*np.cos(alpha_cone))*(1-z_c/h+z_new/h) + y_cone
-                    x = (a*np.cos(theta_new)*np.cos(alpha_cone) - b*np.sin(theta_new)*np.sin(alpha_cone))*(1-z_c/h+z_new/h) + x_cone
-                    y = (a*np.cos(theta_new)*np.sin(alpha_cone) + b*np.sin(theta_new)*np.cos(alpha_cone))*(1-z_c/h+z_new/h) + y_cone
+                    S = np.linspace(0, 1, int(np.sqrt(n)))[:-1]
+                    x_before = (a_ext*np.cos(theta_new)*np.cos(alpha_cone) - b_ext*np.sin(theta_new)*np.sin(alpha_cone))*(1-z_c/h+z_new/h) + x_cone
+                    y_before = (a_ext*np.cos(theta_new)*np.sin(alpha_cone) + b_ext*np.sin(theta_new)*np.cos(alpha_cone))*(1-z_c/h+z_new/h) + y_cone
+                    x = (a_int*np.cos(theta_new)*np.cos(alpha_cone) - b_int*np.sin(theta_new)*np.sin(alpha_cone))*(1-z_c/h+z_new/h) + x_cone
+                    y = (a_int*np.cos(theta_new)*np.sin(alpha_cone) + b_int*np.sin(theta_new)*np.cos(alpha_cone))*(1-z_c/h+z_new/h) + y_cone
+
+                    X_p = list(x_before + (x - x_before)*S)
+                    Y_p = list(y_before + (y - y_before)*S)
+                    Z_p = [z_new]*len(S)
+
+                    X_curve = X_curve + X_p
+                    Y_curve = Y_curve + Y_p
+                    Z_curve = Z_curve + Z_p
+                    
+                    t0 = t
+                    z = z_new
+                    theta = theta_new
+
+                    if stop:
+                        break
+
+                    if z_min:
+                        if z_new < z_min:
+                            stop = True
+                    
+                    cono_sw = [a_int*(1-z_c/h+z_new/h), b_int*(1-z_c/h+z_new/h), h-(z_c-z_new), alpha_cone, x_cone, y_cone, z_new]
+                    params_rampa_sw = [theta_new, descenso, orientacion, None, False, 0]
+
+                    if return_final_theta:
+                        X, Y, Z, theta = Rampa(cono_sw, params_rampa_sw, n=n, z_min=z_min, max_vueltas=3, return_final_theta=True)
+                    else:
+                        X, Y, Z = Rampa(cono_sw, params_rampa_sw, n=n, z_min=z_min, max_vueltas=3)
+                    X_curve = X_curve + X
+                    Y_curve = Y_curve + Y
+                    Z_curve = Z_curve + Z
+                    break
+
+            if switchback_mode:
+                x = (a_ext*np.cos(theta_new)*np.cos(alpha_cone) - b_ext*np.sin(theta_new)*np.sin(alpha_cone))*(1-z_c/h+z_new/h) + x_cone
+                y = (a_ext*np.cos(theta_new)*np.sin(alpha_cone) + b_ext*np.sin(theta_new)*np.cos(alpha_cone))*(1-z_c/h+z_new/h) + y_cone
+            else:
+                x = (a*np.cos(theta_new)*np.cos(alpha_cone) - b*np.sin(theta_new)*np.sin(alpha_cone))*(1-z_c/h+z_new/h) + x_cone
+                y = (a*np.cos(theta_new)*np.sin(alpha_cone) + b*np.sin(theta_new)*np.cos(alpha_cone))*(1-z_c/h+z_new/h) + y_cone
+
+            X_curve.append(x)
+            Y_curve.append(y)
+            Z_curve.append(z_new)
+
+            t0 = t
+            z = z_new
+            theta = theta_new
+
+            if stop:
+                break
+
+            if z_min:
+                if z_new < z_min:
+                    stop = True
+    
+    if return_final_theta:
+        return X_curve, Y_curve, Z_curve, theta
+
+    return X_curve, Y_curve, Z_curve
+
+
+def Rampa_2(cono, params_rampa, n=500, max_vueltas=5, ancho_rampa=30, z_min=None, separacion_switchback=2, return_final_theta=False):
+    
+    theta_0, descenso, orientacion, z_switchback, switchback_mode, lambda_switchback = params_rampa
+
+    if orientacion >= 0:
+        orientacion = 1
+    else:
+        orientacion = -1
+
+    t_final = 2*max_vueltas*np.pi
+
+    p = -descenso
+    a, b, h, alpha_cone, x_cone, y_cone, z_c = cono
+
+    if switchback_mode:
+        a_ext = a + (1-lambda_switchback)*separacion_switchback*ancho_rampa*((1-z_c/h+z_switchback/h)**(-1))
+        b_ext = b + (1-lambda_switchback)*separacion_switchback*ancho_rampa*((1-z_c/h+z_switchback/h)**(-1))
+        a_int = a - (lambda_switchback)*separacion_switchback*ancho_rampa*((1-z_c/h+z_switchback/h)**(-1))
+        b_int = b - (lambda_switchback)*separacion_switchback*ancho_rampa*((1-z_c/h+z_switchback/h)**(-1))
+
+
+    T = np.linspace(0, t_final, n)
+    X_curve = []
+    Y_curve = []
+    Z_curve = []
+
+    z = z_c
+    theta = theta_0
+
+    if switchback_mode:
+        x = (a_ext*np.cos(theta_0)*np.cos(alpha_cone) - b_ext*np.sin(theta_0)*np.sin(alpha_cone)) + x_cone
+        y = (a_ext*np.cos(theta_0)*np.sin(alpha_cone) + b_ext*np.sin(theta_0)*np.cos(alpha_cone)) + y_cone
+    else:
+        x = (a*np.cos(theta_0)*np.cos(alpha_cone) - b*np.sin(theta_0)*np.sin(alpha_cone)) + x_cone
+        y = (a*np.cos(theta_0)*np.sin(alpha_cone) + b*np.sin(theta_0)*np.cos(alpha_cone)) + y_cone
+
+    X_curve.append(x)
+    Y_curve.append(y)
+    Z_curve.append(z)
+    
+    stop = False
+
+
+    for t in T:
+        if t == 0:
+            t0 = 0
+        else:
+            if switchback_mode:
+                R_1 = a_ext*np.cos(theta)*np.cos(alpha_cone) - b_ext*np.sin(theta)*np.sin(alpha_cone)
+                dR_1 = (-a_ext*np.sin(theta)*np.cos(alpha_cone) - b_ext*np.cos(theta)*np.sin(alpha_cone))*orientacion
+                R_2 = a_ext*np.cos(theta)*np.sin(alpha_cone) + b_ext*np.sin(theta)*np.cos(alpha_cone)
+                dR_2 = (-a_ext*np.sin(theta)*np.sin(alpha_cone) + b_ext*np.cos(theta)*np.cos(alpha_cone))*orientacion
+            else:
+                R_1 = a*np.cos(theta)*np.cos(alpha_cone) - b*np.sin(theta)*np.sin(alpha_cone)
+                dR_1 = (-a*np.sin(theta)*np.cos(alpha_cone) - b*np.cos(theta)*np.sin(alpha_cone))*orientacion
+                R_2 = a*np.cos(theta)*np.sin(alpha_cone) + b*np.sin(theta)*np.cos(alpha_cone)
+                dR_2 = (-a*np.sin(theta)*np.sin(alpha_cone) + b*np.cos(theta)*np.cos(alpha_cone))*orientacion
+
+            A = p**2 - 1 + p**2 * R_1**2/h**2 + p**2 * R_2**2/h**2
+            B = (2*p**2/h)*(R_1*dR_1 + R_2*dR_2)*(1-z_c/h + z/h)
+            C = p**2*(dR_1**2 + dR_2**2)*(1 - z_c/h + z/h)**2
+
+            dz = ((-B) + np.sqrt( B**2 - 4*A*C ))/(2*A)
+
+            z_new = z + (t-t0)*dz
+            theta_new = theta_0 + orientacion*t
+
+            if switchback_mode:
+                if z_new<z_switchback:
+                    orientacion *= -1
+                    S = np.linspace(0, 1, int(np.sqrt(n)))[:-1]
+                    x_before = (a_ext*np.cos(theta_new)*np.cos(alpha_cone) - b_ext*np.sin(theta_new)*np.sin(alpha_cone))*(1-z_c/h+z_new/h) + x_cone
+                    y_before = (a_ext*np.cos(theta_new)*np.sin(alpha_cone) + b_ext*np.sin(theta_new)*np.cos(alpha_cone))*(1-z_c/h+z_new/h) + y_cone
+                    x = (a_int*np.cos(theta_new)*np.cos(alpha_cone) - b_int*np.sin(theta_new)*np.sin(alpha_cone))*(1-z_c/h+z_new/h) + x_cone
+                    y = (a_int*np.cos(theta_new)*np.sin(alpha_cone) + b_int*np.sin(theta_new)*np.cos(alpha_cone))*(1-z_c/h+z_new/h) + y_cone
 
                     X_p = list(x_before + (x - x_before)*S)
                     Y_p = list(y_before + (y - y_before)*S)
@@ -1992,19 +2161,26 @@ def Rampa(cono, params_rampa, n=300, max_vueltas=3, ancho_rampa=0, z_min=None, s
                         if z_new < z_min:
                             stop = True
 
-                    z_switchback = None
                     
-                    cono_sw = [a*(1-z_c/h+z_new/h), b*(1-z_c/h+z_new/h), h-(z_c-z_new), alpha_cone, x_cone, y_cone, z_new]
-                    params_rampa_sw = [theta_new, descenso, orientacion, None, False]
+                    cono_sw = [a_int*(1-z_c/h+z_switchback/h), b_int*(1-z_c/h+z_switchback/h), h-(z_c-z_switchback), alpha_cone, x_cone, y_cone, z_switchback]
+                    params_rampa_sw = [theta_new, descenso, orientacion, None, False, 0]
 
-                    X, Y, Z = Rampa(cono_sw, params_rampa_sw, n=300, z_min=z_min, max_vueltas=3)
+
+                    if return_final_theta:
+                        X, Y, Z, theta = Rampa_2(cono_sw, params_rampa_sw, n=n, z_min=z_min, max_vueltas=3, return_final_theta=True)
+                    else:
+                        X, Y, Z = Rampa_2(cono_sw, params_rampa_sw, n=n, z_min=z_min, max_vueltas=3)
                     X_curve = X_curve + X
                     Y_curve = Y_curve + Y
                     Z_curve = Z_curve + Z
                     break
 
-            x = (a*np.cos(theta_new)*np.cos(alpha_cone) - b*np.sin(theta_new)*np.sin(alpha_cone))*(1-z_c/h+z_new/h) + x_cone
-            y = (a*np.cos(theta_new)*np.sin(alpha_cone) + b*np.sin(theta_new)*np.cos(alpha_cone))*(1-z_c/h+z_new/h) + y_cone
+            if switchback_mode:
+                x = (a_ext*np.cos(theta_new)*np.cos(alpha_cone) - b_ext*np.sin(theta_new)*np.sin(alpha_cone))*(1-z_c/h+z_new/h) + x_cone
+                y = (a_ext*np.cos(theta_new)*np.sin(alpha_cone) + b_ext*np.sin(theta_new)*np.cos(alpha_cone))*(1-z_c/h+z_new/h) + y_cone
+            else:
+                x = (a*np.cos(theta_new)*np.cos(alpha_cone) - b*np.sin(theta_new)*np.sin(alpha_cone))*(1-z_c/h+z_new/h) + x_cone
+                y = (a*np.cos(theta_new)*np.sin(alpha_cone) + b*np.sin(theta_new)*np.cos(alpha_cone))*(1-z_c/h+z_new/h) + y_cone
 
             X_curve.append(x)
             Y_curve.append(y)
@@ -2020,9 +2196,147 @@ def Rampa(cono, params_rampa, n=300, max_vueltas=3, ancho_rampa=0, z_min=None, s
             if z_min:
                 if z_new < z_min:
                     stop = True
-            
+    
+    if return_final_theta:
+        return X_curve, Y_curve, Z_curve, theta
 
     return X_curve, Y_curve, Z_curve
+
+def Rampa_descenso_variable(mina, cono, params_rampa, min_area, n=500, ancho_rampa=30, max_vueltas=5, separacion_switchback=2, output_mode=True, debug=False):
+    theta_0, descenso_vec, orientacion, z_switchback, switchback_mode, lambda_switchback = params_rampa
+
+    z_steps = sorted(mina['z'].unique())[::-1]
+
+    X_curve, Y_curve, Z_curve = [], [], []
+
+    theta_actual = theta_0
+    orientacion_actual = orientacion
+
+    a, b, h, alpha_cone, x_cone, y_cone, z_c = cono
+
+    z_actual = z_c
+    rampas = []
+
+    for i in range(len(descenso_vec)):
+        cono_tramo = [a*(1-z_c/h+z_actual/h), b*(1-z_c/h+z_actual/h), h-(z_c-z_actual), alpha_cone, x_cone, y_cone, z_actual]
+
+        z_min_area = Z_min(mina, cono_tramo, min_area=min_area)
+        if debug:
+            print(f'Area minima:{z_min_area}')
+
+        params_tramo = [theta_actual, descenso_vec[i], orientacion_actual, z_switchback, switchback_mode, lambda_switchback]
+
+        X_i, Y_i, Z_i, theta_actual = Rampa(
+            cono_tramo,
+            params_tramo,
+            n=n,
+            z_min=np.max([z_steps[i+1], z_min_area]),
+            return_final_theta=True,
+            ancho_rampa=ancho_rampa,
+            max_vueltas=max_vueltas
+        )
+
+        z_actual =  Z_i[-1]
+        if (z_actual < z_switchback) and (switchback_mode):
+            if debug:
+                print(f'Altura del switchback:{z_actual}')
+            orientacion_actual *= -1
+            switchback_mode = False
+            a-= (lambda_switchback)*separacion_switchback*ancho_rampa*((1-z_c/h+z_switchback/h)**(-1))
+            b-= (lambda_switchback)*separacion_switchback*ancho_rampa*((1-z_c/h+z_switchback/h)**(-1))
+
+        rampas.append([X_i, Y_i, Z_i])
+        X_curve += X_i
+        Y_curve += Y_i
+        Z_curve += Z_i
+    
+    if output_mode:
+        return X_curve, Y_curve, Z_curve
+    else:
+        return rampas
+
+
+
+def Rampa_descenso_variable_2(mina, cono, params_rampa, min_area, n=500, ancho_rampa=30, max_vueltas=5, separacion_switchback=2, output_mode=True, debug=False, correction_factor=1):
+    theta_0, descenso_vec, orientacion, z_switchback_vec, switchback_mode, lambda_switchback = params_rampa
+
+
+    z_steps = sorted(mina['z'].unique())[::-1]
+
+    z_switchback_vec = sorted(z_switchback_vec)[::-1]
+    z_switchback_vec = z_switchback_vec[0:switchback_mode]
+
+    if len(z_switchback_vec)==0:
+        z_switchback_vec = [0]
+
+    X_curve, Y_curve, Z_curve = [], [], []
+
+    theta_actual = theta_0
+    orientacion_actual = orientacion
+
+    a, b, h, alpha_cone, x_cone, y_cone, z_c = cono
+
+    for z in z_switchback_vec[::-1][1:len(z_switchback_vec)]:
+        a+= correction_factor*separacion_switchback*ancho_rampa*((1-z_c/h+z/h)**(-1))
+        b+= correction_factor*separacion_switchback*ancho_rampa*((1-z_c/h+z/h)**(-1))
+
+
+    z_actual = z_c
+    rampas = []
+
+    for i in range(len(descenso_vec)):
+        cono_tramo = [a*(1-z_c/h+z_actual/h), b*(1-z_c/h+z_actual/h), h-(z_c-z_actual), alpha_cone, x_cone, y_cone, z_actual]
+
+        z_min_area = Z_min(mina, cono_tramo, min_area=min_area)
+        if debug:
+            print(f'Area minima:{z_min_area}')
+
+        params_tramo = [theta_actual, descenso_vec[i], orientacion_actual, z_switchback_vec[0], switchback_mode, lambda_switchback]
+
+        X_i, Y_i, Z_i, theta_actual = Rampa_2(
+            cono_tramo,
+            params_tramo,
+            n=n,
+            z_min=np.max([z_steps[i+1], z_min_area]),
+            return_final_theta=True,
+            ancho_rampa=ancho_rampa,
+            max_vueltas=max_vueltas
+        )
+
+        z_actual =  Z_i[-1]
+        if (z_actual < z_switchback_vec[0]) and (switchback_mode):
+            if debug:
+                print(f'Altura del switchback:{z_actual}')
+            orientacion_actual *= -1
+
+            switchback_mode -= 1
+
+            if switchback_mode>=1:
+                a-= correction_factor*separacion_switchback*ancho_rampa*((1-z_c/h+z_switchback_vec[0]/h)**(-1))
+                b-= correction_factor*separacion_switchback*ancho_rampa*((1-z_c/h+z_switchback_vec[0]/h)**(-1))
+            else:
+                a-= (lambda_switchback)*separacion_switchback*ancho_rampa*((1-z_c/h+z_switchback_vec[0]/h)**(-1))
+                b-= (lambda_switchback)*separacion_switchback*ancho_rampa*((1-z_c/h+z_switchback_vec[0]/h)**(-1))
+
+            z_switchback_vec = z_switchback_vec[1:len(z_switchback_vec)]
+            if len(z_switchback_vec)==0:
+                z_switchback_vec = [0]
+
+        # if i>=1:
+        #     xi, yi, zi = X_i[0], Y_i[0], Z_i[0]
+        #     xj, yj, zj = X_curve[-1], Y_curve[-1], Z_curve[-1]
+        #     norm = np.linalg.norm( np.array([xi, yi, zi]) - np.array([xj, yj, zj]) )
+        #     print(f'{i}->{i+1}: {norm}')
+
+        rampas.append([X_i, Y_i, Z_i])
+        X_curve += X_i
+        Y_curve += Y_i
+        Z_curve += Z_i
+    
+    if output_mode:
+        return X_curve, Y_curve, Z_curve
+    else:
+        return rampas
 
 
 '''
@@ -2286,10 +2600,11 @@ def Best_Ramp_gp(mina, mina_rellena, params_cono, min_area, ancho_rampa, options
     z_top = (alpha_z)*z_min + (1-alpha_z)*z_max
     space = [
         Real(-np.pi, np.pi, name='theta'),
-        Real(0.05, 0.15, name='descenso'),
+        Real(0.02, 0.10, name='descenso'),
         Real(-1, 1, name='orientacion'),
         Real(z_low, z_top, name='z_switchback'),
-        Categorical([False, True], name='switchback_mode')
+        Categorical([False, True], name='switchback_mode'),
+        Real(0, 1, name='lambda_switchback')
     ]
 
     def objective(params):
@@ -2331,6 +2646,196 @@ def Best_Ramp_gp(mina, mina_rellena, params_cono, min_area, ancho_rampa, options
 
     return result
 
+
+
+
+def Best_Ramp_gp_2(mina, mina_rellena, params_cono, min_area, ancho_rampa, options=dict()):
+
+    options.setdefault('x0', [])
+    options.setdefault('ref_rampa', 300)
+    options.setdefault('separacion_switchback', 2)
+    options.setdefault('angulo_apertura_up', 20)
+    options.setdefault('angulo_apertura_down', 20)
+    options.setdefault('config', '9-points')
+    options.setdefault('BlockWidthX', 10)
+    options.setdefault('BlockWidthY', 10)
+    options.setdefault('BlockHeightZ', 16)
+    options.setdefault('n_calls', 50)
+    options.setdefault('n_initial_points', 10)
+    options.setdefault('acq_func', 'gp_hedge')
+    options.setdefault('random_state', 73)
+
+    x0 = options['x0']
+    ref_rampa = options['ref_rampa']
+    separacion_switchback = options['separacion_switchback']
+    angulo_apertura_up = options['angulo_apertura_up']
+    angulo_apertura_down = options['angulo_apertura_down']
+    config = options['config']
+    BlockWidthX = options['BlockWidthX']
+    BlockWidthY = options['BlockWidthY']
+    BlockHeightZ = options['BlockHeightZ']
+    n_calls = options['n_calls']
+    n_initial_points = options['n_initial_points']
+    acq_func = options['acq_func']
+    random_state = options['random_state']
+
+
+
+    z_min = Z_min(mina, params_cono, min_area=min_area)
+    z_max = mina['z'].max()
+    alpha_z = 0.1
+    z_low = (1-alpha_z)*z_min + alpha_z*z_max
+    z_top = (alpha_z)*z_min + (1-alpha_z)*z_max
+
+
+    N = len(mina['z'].unique())-1
+    space = [Real(-np.pi, np.pi, name='theta')] + \
+            [Real(0.02, 0.10, name=f'descenso_{i}') for i in range(N)] + \
+            [Real(-1, 1, name='orientacion'),
+            Real(z_low, z_top, name='z_switchback'),
+            Categorical([False, True], name='switchback_mode'),
+            Real(0, 1, name='lambda_switchback')]
+
+    def objective(params):
+        theta = params[0]
+        descenso_vec = params[1:N+1]
+        orientacion = params[N+1]
+        z_switchback = params[N+2]
+        switchback_mode = params[N+3]
+        lambda_switchback = params[N+4]
+
+        rampa = Rampa_descenso_variable(mina, params_cono, [theta, descenso_vec, orientacion, z_switchback, switchback_mode, lambda_switchback], min_area, n=ref_rampa, ancho_rampa=ancho_rampa, separacion_switchback=separacion_switchback, output_mode=True)
+
+        id_in_rampa = isin_rampa(mina, mina_rellena, cono=params_cono, BlockHeightZ=BlockHeightZ, rampa=rampa, ancho_rampa=ancho_rampa, ord=np.inf)
+
+        all_precedences, all_support = total_additional_blocks(mina_rellena, id_in_rampa,
+                                                               params={
+                                                                   'BlockWidthX': BlockWidthX,
+                                                                   'BlockWidthY': BlockWidthY,
+                                                                   'BlockHeightZ': BlockHeightZ,
+                                                                   'config': config,
+                                                                   'angulo_apertura_up': angulo_apertura_up,
+                                                                   'angulo_apertura_down': angulo_apertura_down
+                                                               })
+
+        total_ids = (set(mina['id']) | all_precedences) - all_support
+        mina_con_rampa = mina_rellena[mina_rellena['id'].isin(total_ids)]
+
+        return -mina_con_rampa['value'].sum()
+
+    result = gp_minimize(
+        func=objective,
+        dimensions=space,
+        n_calls=n_calls,
+        x0=x0 if x0 else None,
+        random_state=random_state,
+        verbose=True,
+        n_initial_points=n_initial_points,
+        acq_func=acq_func
+    )
+
+    print("Mejor solución encontrada:")
+    print('[θ, descenso, orientacion, z_switchback, switchback_mode] = ', result.x)
+    print("Valor objetivo:", result.fun)
+
+    return result
+
+
+
+from skopt.space import Real, Integer, Categorical
+def Best_Ramp_gp_3(mina, mina_rellena, params_cono, min_area, ancho_rampa, options=dict()):
+
+    options.setdefault('x0', [])
+    options.setdefault('ref_rampa', 300)
+    options.setdefault('separacion_switchback', 2)
+    options.setdefault('angulo_apertura_up', 20)
+    options.setdefault('angulo_apertura_down', 20)
+    options.setdefault('config', '9-points')
+    options.setdefault('BlockWidthX', 10)
+    options.setdefault('BlockWidthY', 10)
+    options.setdefault('BlockHeightZ', 16)
+    options.setdefault('n_calls', 50)
+    options.setdefault('n_initial_points', 10)
+    options.setdefault('acq_func', 'gp_hedge')
+    options.setdefault('random_state', 73)
+
+    x0 = options['x0']
+    ref_rampa = options['ref_rampa']
+    separacion_switchback = options['separacion_switchback']
+    angulo_apertura_up = options['angulo_apertura_up']
+    angulo_apertura_down = options['angulo_apertura_down']
+    config = options['config']
+    BlockWidthX = options['BlockWidthX']
+    BlockWidthY = options['BlockWidthY']
+    BlockHeightZ = options['BlockHeightZ']
+    n_calls = options['n_calls']
+    n_initial_points = options['n_initial_points']
+    acq_func = options['acq_func']
+    random_state = options['random_state']
+
+
+
+    z_min = Z_min(mina, params_cono, min_area=min_area)
+    z_max = mina['z'].max()
+    alpha_z = 0.1
+    z_low = (1-alpha_z)*z_min + alpha_z*z_max
+    z_top = (alpha_z)*z_min + (1-alpha_z)*z_max
+
+
+    N = len(mina['z'].unique())-1
+    M = 3
+    space = [Real(-np.pi, np.pi, name='theta')] + \
+            [Real(0.02, 0.10, name=f'descenso_{i}') for i in range(N)] + \
+            [Real(-1, 1, name='orientacion')] + \
+            [Real(z_low, z_top, name=f'z_switchback_{i}') for i in range(M)] + \
+            [Integer(0, M, name='switchback_mode'),
+            Real(0, 1, name='lambda_switchback')]
+
+    def objective(params):
+        theta = params[0]
+        descenso_vec = params[1:N+1]
+        orientacion = params[N+1]
+        z_switchback = params[N+2:N+2+M]
+        switchback_mode = params[N+2+M]
+        lambda_switchback = params[N+2+M+1]
+
+        rampa = Rampa_descenso_variable_2(mina, params_cono, [theta, descenso_vec, orientacion, z_switchback, switchback_mode, lambda_switchback], min_area, n=ref_rampa, ancho_rampa=ancho_rampa, separacion_switchback=separacion_switchback, output_mode=True, correction_factor=(1-1.231)*(lambda_switchback) + 1.231)
+
+        id_in_rampa = isin_rampa(mina, mina_rellena, cono=params_cono, BlockHeightZ=BlockHeightZ, rampa=rampa, ancho_rampa=ancho_rampa, ord=np.inf)
+
+        all_precedences, all_support = total_additional_blocks(mina_rellena, id_in_rampa,
+                                                               params={
+                                                                   'BlockWidthX': BlockWidthX,
+                                                                   'BlockWidthY': BlockWidthY,
+                                                                   'BlockHeightZ': BlockHeightZ,
+                                                                   'config': config,
+                                                                   'angulo_apertura_up': angulo_apertura_up,
+                                                                   'angulo_apertura_down': angulo_apertura_down
+                                                               })
+
+        total_ids = (set(mina['id']) | all_precedences) - all_support
+        mina_con_rampa = mina_rellena[mina_rellena['id'].isin(total_ids)]
+
+        return -mina_con_rampa['value'].sum() + Longitud_Rampa(rampa)
+
+    result = gp_minimize(
+        func=objective,
+        dimensions=space,
+        n_calls=n_calls,
+        x0=x0 if x0 else None,
+        random_state=random_state,
+        verbose=True,
+        n_initial_points=n_initial_points,
+        acq_func=acq_func
+    )
+
+    print("Mejor solución encontrada:")
+    print('[θ, descenso, orientacion, z_switchback, switchback_mode] = ', result.x)
+    print("Valor objetivo:", result.fun)
+
+    return result
+
+
 '''
 Calcula los puntos iniciales de minado respecto a la rampa.
 Idealmente debe usarse por fases.
@@ -2352,7 +2857,10 @@ def Puntos_Iniciales(mina, rampa,
         counter = 0
         for z in Z_curve:
             if h > z:
-                positions.append(counter-1)
+                if counter == 0:
+                    positions.append(counter)
+                else:
+                    positions.append(counter-1)
                 break
             counter+=1
 
@@ -2383,8 +2891,9 @@ def Clustering(mina, cm=2, cr=0.25, cp=10, P=4, R=0.85, ley_corte=0.142303657862
     options.setdefault('BlockHeightZ', 16)
     options.setdefault('area_minima_operativa', np.pi*80*80)
 
-    options.setdefault('refinamiento_rampa', 300)
-    options.setdefault('ancho_rampa', 30)
+    # options.setdefault('refinamiento_rampa', 300)
+    # options.setdefault('ancho_rampa', 30)
+
 
     options.setdefault('peso_distancia', 2)
     options.setdefault('peso_ley', 0)
@@ -2485,15 +2994,18 @@ def Clustering(mina, cm=2, cr=0.25, cp=10, P=4, R=0.85, ley_corte=0.142303657862
 
     for fase in fases_mina:
         mini_mina = mina[mina['fase'] == fase]
-        bancos = sorted(mini_mina['banco'].unique())
+        bancos = sorted(mini_mina['banco'].unique())[::-1]
 
         if peso_directional_mining > 0:
             cono = list( np.load(Path(path_params + f'cono_{fase}.npy')) )
-            params_rampa = list( np.load(Path(path_params + f'rampa_{fase}.npy')) )
+            # params_rampa = list( np.load(Path(path_params + f'rampa_{fase}.npy')) )
+
+            # z_min = Z_min(mini_mina, cono, area_minima_operativa)
+            # rampa = Rampa(cono, params_rampa, n=ref_ramp, z_min=z_min, ancho_rampa=ancho_rampa)
+
+            rampa = list( np.load(Path(path_params + f'puntos_rampa_{fase}.npy')) )
 
             z_min = Z_min(mini_mina, cono, area_minima_operativa)
-            rampa = Rampa(cono, params_rampa, n=ref_ramp, z_min=z_min, ancho_rampa=ancho_rampa)
-
             puntos_iniciales = Puntos_Iniciales(mini_mina, rampa, z_min)
 
         for banco in bancos:
