@@ -7,6 +7,9 @@ import matplotlib.patches as patches
 import matplotlib.colors as mcolors 
 import time
 
+from matplotlib.animation import FuncAnimation
+import matplotlib.cm as cm
+
 import plotly.graph_objects as go
 
 from skopt.utils import use_named_args
@@ -517,7 +520,7 @@ Formato de datos:
 # elipse = [ (a1, b1, x1_centro, y1_centro, alpha1), (a2, b2, x2_centro, y2_centro, alpha2), ... ]
 # save_as_image: True si, en vez de mostrar el gráfico, se guarde en un archivo .png. Requiere de un path_file entregado por path_to_save.
 '''
-def plot_fase_banco(FaseBanco, column_hue='cut', text_hue=None, params=dict()):
+def plot_fase_banco(FaseBanco, column_hue='cut', text_hue=None, params=dict(), ax=None):
     if FaseBanco.empty:
         raise ValueError("El DataFrame 'FaseBanco' está vacío. No se puede graficar.")
 
@@ -566,7 +569,12 @@ def plot_fase_banco(FaseBanco, column_hue='cut', text_hue=None, params=dict()):
     ysize=int(ysize)
     dpi=float(dpi)
 
-    fig, ax = plt.subplots(figsize=(xsize, ysize), dpi=dpi)
+    # fig, ax = plt.subplots(figsize=(xsize, ysize), dpi=dpi)
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(xsize, ysize), dpi=dpi)
+    else:
+        fig = ax.figure
+        ax.clear()
     norm = None
     colormap = None
     color_map_discrete = {}
@@ -582,13 +590,14 @@ def plot_fase_banco(FaseBanco, column_hue='cut', text_hue=None, params=dict()):
     else:
         is_continuous = False
     
+    is_continuous = True
     if is_continuous:
         vmin = np.min(col_data)
         vmax = np.max(col_data)
         norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
         colormap = plt.get_cmap(cmap)
     else:
-        if len(col_data.unique())<=20:
+        if len(col_data.unique())<=1:
             colors = plt.get_cmap('tab20', len(col_data.unique()))
             color_map_discrete = {val: colors(i) for i, val in enumerate(col_data.unique())}
         else:
@@ -714,6 +723,42 @@ def plot_fase_banco(FaseBanco, column_hue='cut', text_hue=None, params=dict()):
         plt.show()
 
 
+from copy import deepcopy
+def animate_fase_banco(history, column_hue='cluster', params=dict(), save_path=None, fps=2, real_steps=None):
+    if not history:
+        raise ValueError("La historia de clusterización está vacía.")
+    
+    plot_params = deepcopy(params)
+    plot_params.setdefault('xsize', 10)
+    plot_params.setdefault('ysize', 10)
+    plot_params.setdefault('dpi', 100)
+    plot_params['guardar_imagen'] = False  # Nunca guardar dentro de plot
+
+    fig, ax = plt.subplots(figsize=(plot_params['xsize'], plot_params['ysize']), dpi=plot_params['dpi'])
+
+    def update(frame):
+        ax.clear()
+        df = history[frame]
+        plot_fase_banco(df, column_hue=column_hue, text_hue=None, params=plot_params, ax=ax)
+
+        paso = real_steps[frame] if real_steps else frame + 1
+        ax.set_title(f'Paso {paso} - Clusters: {df[column_hue].nunique()}')
+
+        return ax,
+
+    ani = FuncAnimation(fig, update, frames=len(history), blit=False, repeat=False)
+
+    if save_path:
+        if save_path.endswith('.gif'):
+            ani.save(save_path, writer='pillow', fps=fps)
+        elif save_path.endswith('.mp4'):
+            ani.save(save_path, writer='ffmpeg', fps=fps)
+        else:
+            raise ValueError("El archivo debe tener extensión '.mp4' o '.gif'")
+    else:
+        plt.show()
+
+    return ani
 
 
 
@@ -819,7 +864,7 @@ def Calculate_Similarity_Matrix(FaseBanco, params = dict()):
     params.setdefault('tolerancia_ley', 0.001)
     params.setdefault('peso_direccion_mineria', 0.25)
     params.setdefault('tolerancia_direccion_mineria', 0.001)
-    params.setdefault('vector_mineria', None)
+    params.setdefault('vector_mineria', [])
     params.setdefault('penalizacion_destino', 0.9)
     params.setdefault('penalizacion_roca', 0.9)
 
@@ -945,7 +990,7 @@ Average_Desired_Length_Cluster y Max_Cluster_Length son restricciones del tamañ
 Depende de la funcion Find_Most_Similar_Adjacent_Clusters.
 Devuelve un DataFrame de la fase-banco incluyendo una nueva columna llamada 'cluster' que indica el cluster al que pertenece cada bloque.
 '''
-def Clustering_Tabesh(FaseBanco, AdjencyMatrix, SimilarityMatrix, params=dict()):
+def Clustering_Tabesh(FaseBanco, AdjencyMatrix, SimilarityMatrix, params=dict(), animation_mode=False):
     params.setdefault('Average_Length_Cluster', 30)
     params.setdefault('Max_Length_Cluster', 35)
     params.setdefault('Reset_Clusters_Index', True)
@@ -955,6 +1000,8 @@ def Clustering_Tabesh(FaseBanco, AdjencyMatrix, SimilarityMatrix, params=dict())
     Max_Cluster_Length = params['Max_Length_Cluster']
     Reset_Clusters_Index = params['Reset_Clusters_Index']
     debug = params['debug']
+
+    history = []
 
     
     fase_banco = FaseBanco.copy()
@@ -1007,6 +1054,8 @@ def Clustering_Tabesh(FaseBanco, AdjencyMatrix, SimilarityMatrix, params=dict())
             N_Clusters -= 1
             Clusters_Eliminados += 1
 
+            if animation_mode:
+                history.append(fase_banco.copy())
         else:
             adj_matrix_sparse[i,j] = 0
             adj_matrix_sparse[j,i] = 0
@@ -1021,6 +1070,9 @@ def Clustering_Tabesh(FaseBanco, AdjencyMatrix, SimilarityMatrix, params=dict())
     if Reset_Clusters_Index:
         fase_banco['cluster'] = fase_banco['cluster'].map(lambda x: np.array(range(1,N_Clusters+1))[np.where(fase_banco['cluster'].unique() == x)[0][0]] if x in fase_banco['cluster'].unique() else x)
 
+    if animation_mode:
+        history.append(fase_banco.copy())
+
     print(f"========PreProcessing Results========")
     print(f"Tamaño Fase-Banco: {n}")
     print(f"Clusters objetivo: {Max_N_Clusters}")
@@ -1028,6 +1080,8 @@ def Clustering_Tabesh(FaseBanco, AdjencyMatrix, SimilarityMatrix, params=dict())
     print(f"Total de clusters: {N_Clusters}")
     print(f'Tiempo: {execution_time}')
 
+    if animation_mode:
+        return fase_banco, execution_time, N_Clusters, history
     return fase_banco, execution_time, N_Clusters
 
 
@@ -1326,8 +1380,6 @@ def Precedencias_Clusters_Agend(FaseBanco, vector_mineria,
     fase_banco = FaseBanco.copy()
     ID_Clusters = fase_banco['cluster'].unique()
     Num_Clusters = len(ID_Clusters)
-
-    
     
     t1 = time.time()
     Centers = Centros_Clusters(FaseBanco)
@@ -1595,7 +1647,7 @@ def relleno_mina(mina, default_density,
     claves_B = set(map(tuple, mina[claves].values))
     mascara_solo_new_mina = ~mina_rellena[claves].apply(tuple, axis=1).isin(claves_B)
 
-    inicio_id = len(mina) + 1
+    inicio_id = mina['id'].max() + 1
     mina_rellena.loc[mascara_solo_new_mina, 'id'] = range(inicio_id, inicio_id + mascara_solo_new_mina.sum())
     mina_rellena['id'] = mina_rellena['id'].astype(int)
 
@@ -1608,6 +1660,73 @@ def relleno_mina(mina, default_density,
 
     return mina_rellena
 
+
+
+def relleno_mina_angular(mina, default_density,
+                 BlockWidthX, BlockWidthY, BlockHeightZ,
+                 cm, cr, cp, P, FTL, R, ley_corte,
+                 relleno_lateral=100, angulo_cono_deg=10):
+    pendiente = np.tan(np.radians(angulo_cono_deg))
+
+    mina_copy = mina.copy()
+    mina_copy['value'] = 0 
+
+    x_min, x_max = mina['x'].min(), mina['x'].max()
+    y_min, y_max = mina['y'].min(), mina['y'].max()
+
+    X_values = set(mina['x'].unique())
+    Y_values = set(mina['y'].unique())
+    Z_values = mina['z'].unique()
+
+    for i in range(1, relleno_lateral + 1):
+        X_values.update([x_min - i * BlockWidthX, x_max + i * BlockWidthX])
+        Y_values.update([y_min - i * BlockWidthY, y_max + i * BlockWidthY])
+
+    X_values = sorted(X_values)
+    Y_values = sorted(Y_values)
+
+    columns = list(mina_copy.columns)
+    Coords = list(product(X_values, Y_values, Z_values))
+
+    new_mina = pd.DataFrame(0, index=range(len(Coords)), columns=columns)
+    new_mina[['x','y','z']] = pd.DataFrame(Coords, columns=['x','y','z'])
+    new_mina['density'] = default_density
+    new_mina['tipomineral'] = -2
+
+    aire_mask = np.full(len(new_mina), False)
+
+    for _, bloque in mina.iterrows():
+        x0, y0, z0 = bloque['x'], bloque['y'], bloque['z']
+        dx = new_mina['x'] - x0
+        dy = new_mina['y'] - y0
+        dz = new_mina['z'] - z0
+
+        dist = np.sqrt(dx**2 + dy**2)
+
+        in_cono = (dz > 0) & (dist <= dz*pendiente)
+        aire_mask |= in_cono
+
+    new_mina.loc[aire_mask, 'density'] = 0
+    new_mina.loc[aire_mask, 'tipomineral'] = -1
+    
+    claves = ['x', 'y', 'z']
+    mina_rellena = mina_copy.set_index(claves).combine_first(new_mina.set_index(claves)).reset_index()
+
+    claves_B = set(map(tuple, mina[claves].values))
+    mascara_solo_new_mina = ~mina_rellena[claves].apply(tuple, axis=1).isin(claves_B)
+
+    inicio_id = mina['id'].max() + 1
+    mina_rellena.loc[mascara_solo_new_mina, 'id'] = range(inicio_id, inicio_id + mascara_solo_new_mina.sum())
+    mina_rellena['id'] = mina_rellena['id'].astype(int)
+
+    Block_Vol = BlockWidthX * BlockWidthY * BlockHeightZ
+
+    mina_rellena['value'] = np.where(
+        mina_rellena['cut']<ley_corte, 
+        -cm*mina_rellena['density']*Block_Vol, 
+        (P-cr)*FTL*R*mina_rellena['cut']*(mina_rellena['density']/100.0)*Block_Vol - (cp+cm)*mina_rellena['density']*Block_Vol)
+    
+    return mina_rellena
 
 '''
 Identifica los puntos de la mina rellena que están dentro del cono especificado.
@@ -2202,6 +2321,8 @@ def Rampa_2(cono, params_rampa, n=500, max_vueltas=5, ancho_rampa=30, z_min=None
 
     return X_curve, Y_curve, Z_curve
 
+
+# Descenso variable con solo 1 switchback
 def Rampa_descenso_variable(mina, cono, params_rampa, min_area, n=500, ancho_rampa=30, max_vueltas=5, separacion_switchback=2, output_mode=True, debug=False):
     theta_0, descenso_vec, orientacion, z_switchback, switchback_mode, lambda_switchback = params_rampa
 
@@ -2256,7 +2377,7 @@ def Rampa_descenso_variable(mina, cono, params_rampa, min_area, n=500, ancho_ram
         return rampas
 
 
-
+# Descenso variable con switchback vectorial
 def Rampa_descenso_variable_2(mina, cono, params_rampa, min_area, n=500, ancho_rampa=30, max_vueltas=5, separacion_switchback=2, output_mode=True, debug=False, correction_factor=1):
     theta_0, descenso_vec, orientacion, z_switchback_vec, switchback_mode, lambda_switchback = params_rampa
 
@@ -2566,11 +2687,11 @@ def Best_Ramp_diff_evol(mina, mina_rellena, params_cono, min_area, ancho_rampa, 
 #     return result
 
 
-
+# Optimizacion Rampa en espiral
 def Best_Ramp_gp(mina, mina_rellena, params_cono, min_area, ancho_rampa, options=dict()):
 
     options.setdefault('x0', [])
-    options.setdefault('ref_rampa', 300)
+    options.setdefault('ref_rampa', 1000)
     options.setdefault('angulo_apertura_up', 20)
     options.setdefault('angulo_apertura_down', 20)
     options.setdefault('config', '9-points')
@@ -2602,17 +2723,18 @@ def Best_Ramp_gp(mina, mina_rellena, params_cono, min_area, ancho_rampa, options
         Real(-np.pi, np.pi, name='theta'),
         Real(0.02, 0.10, name='descenso'),
         Real(-1, 1, name='orientacion'),
-        Real(z_low, z_top, name='z_switchback'),
-        Categorical([False, True], name='switchback_mode'),
-        Real(0, 1, name='lambda_switchback')
+        # Categorical([z_low], name='z_switchback'),
+        # Categorical([0], name='switchback_mode'),
+        # Categorical([0], name='lambda_switchback')
     ]
 
     def objective(params):
         # z_switchback, switchback_mode = params[3], params[4]
         # z_switchback = None if switchback_mode == 'none' else z_switchback
-        # params_rampa = (params[0], params[1], params[2], z_switchback)
+        params_rampa = (params[0], params[1], params[2], 0, 0, 0)
 
-        rampa = Rampa(params_cono, params, n=ref_rampa, ancho_rampa=ancho_rampa, z_min=z_min)
+
+        rampa = Rampa(params_cono, params_rampa, n=ref_rampa, ancho_rampa=ancho_rampa, z_min=z_min)
 
         id_in_rampa = isin_rampa(mina, mina_rellena, cono=params_cono, BlockHeightZ=BlockHeightZ, rampa=rampa, ancho_rampa=ancho_rampa, ord=np.inf)
 
@@ -2648,7 +2770,7 @@ def Best_Ramp_gp(mina, mina_rellena, params_cono, min_area, ancho_rampa, options
 
 
 
-
+# Optimizacion rampa en espiral con descenso variable
 def Best_Ramp_gp_2(mina, mina_rellena, params_cono, min_area, ancho_rampa, options=dict()):
 
     options.setdefault('x0', [])
@@ -2692,9 +2814,9 @@ def Best_Ramp_gp_2(mina, mina_rellena, params_cono, min_area, ancho_rampa, optio
     space = [Real(-np.pi, np.pi, name='theta')] + \
             [Real(0.02, 0.10, name=f'descenso_{i}') for i in range(N)] + \
             [Real(-1, 1, name='orientacion'),
-            Real(z_low, z_top, name='z_switchback'),
-            Categorical([False, True], name='switchback_mode'),
-            Real(0, 1, name='lambda_switchback')]
+            Categorical([z_low], name='z_switchback'),
+            Categorical([0], name='switchback_mode'),
+            Categorical([0], name='lambda_switchback')]
 
     def objective(params):
         theta = params[0]
@@ -2777,10 +2899,11 @@ def Best_Ramp_gp_3(mina, mina_rellena, params_cono, min_area, ancho_rampa, optio
 
     z_min = Z_min(mina, params_cono, min_area=min_area)
     z_max = mina['z'].max()
-    alpha_z = 0.1
+    alpha_z = 0.05
     z_low = (1-alpha_z)*z_min + alpha_z*z_max
     z_top = (alpha_z)*z_min + (1-alpha_z)*z_max
 
+    print(z_low, z_top)
 
     N = len(mina['z'].unique())-1
     M = 3
