@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import matplotlib.colors as mcolors 
 import time
+from collections import defaultdict
 
 from matplotlib.animation import FuncAnimation
 import matplotlib.cm as cm
@@ -3438,3 +3439,343 @@ def Calculate_Vertical_Adyacency_Matrix(df_sup, df_inf, BlockWidth=10, BlockHeig
 
 
     return A_clusters
+
+def Clustering_mod(mina, cm=2, cr=0.25, cp=10, P=4, R=0.85, ley_corte=0.1423036578621615,
+               options=dict()):
+    if mina.empty:
+        raise ValueError('Inserte un dataframe "mina" no vacio.')
+    
+    if not('destino' in mina.columns):
+        mina['destino'] = [1 if mina.iloc[i]['cut']>= ley_corte else 0 for i in range(len(mina))]
+
+    options.setdefault('BlockWidthX', 10)
+    options.setdefault('BlockWidthY', 10)
+    options.setdefault('BlockHeightZ', 16)
+    options.setdefault('area_minima_operativa', np.pi*80*80)
+
+    options.setdefault('refinamiento_rampa', 300)
+    options.setdefault('ancho_rampa', 30)
+
+
+    options.setdefault('peso_distancia', 2)
+    options.setdefault('peso_ley', 0)
+    options.setdefault('tolerancia_ley', 0.001)
+    options.setdefault('peso_direccion_mineria', 0.25)
+    options.setdefault('tolerancia_direccion_mineria', 0.001)
+    options.setdefault('penalizacion_destino', 0.9)
+    options.setdefault('penalizacion_roca', 0.9)
+    options.setdefault('penalizacion_c', 0.5)
+
+    options.setdefault('tamaño_maximo_cluster', 0.1)
+    options.setdefault('tamaño_promedio_cluster', 0.075)
+    options.setdefault('tamaño_minimo_cluster', 0.01)
+    options.setdefault('tolerancia_tamaño_maximo_cluster', 10)
+    options.setdefault('tolerancia_tamaño_minimo_cluster', 5)
+
+    options.setdefault('Shape_Refinement', 'Tabesh') # None, 'Tabesh' o 'Modificado'
+    options.setdefault('Iteraciones_Shape_Refinement', 5)
+
+    options.setdefault('save', True)
+    options.setdefault('save_images', True)
+    options.setdefault('path_save', 'Clusterizacion/Resultados/')
+    options.setdefault('path_save_images', 'Clusterizacion/Imagenes/')
+    options.setdefault('path_params', 'Clusterizacion/Params/')
+
+    BlockWidthX = options['BlockWidthX']
+    BlockWidthY = options['BlockWidthY']
+    BlockHeightZ = options['BlockHeightZ']
+    area_minima_operativa = options['area_minima_operativa']
+
+    ancho_rampa = options['ancho_rampa']
+    ref_ramp = options['refinamiento_rampa']
+
+    
+    peso_distancia = options['peso_distancia']
+    peso_ley = options['peso_ley']
+    tol_ley = options['tolerancia_ley']
+    peso_directional_mining = options['peso_direccion_mineria']
+    tol_directional_mining = options['tolerancia_direccion_mineria']
+    penalizacion_destino = options['penalizacion_destino']
+    penalizacion_roca = options['penalizacion_roca']
+    penalizacion_c = options['penalizacion_c']
+
+    
+    if options['tamaño_maximo_cluster'] <= 1:
+        Max_Cluster_Length_multiplier = options['tamaño_maximo_cluster']
+        max_cluster_mode = True
+    else:
+        Max_Cluster_Length_st = int(options['tamaño_maximo_cluster'])
+        max_cluster_mode = False
+    
+    if options['tamaño_promedio_cluster'] <= 1:
+        Average_Cluster_Length_multiplier = options['tamaño_promedio_cluster']
+        average_cluster_mode = True
+    else:
+        Average_Cluster_Length_st = int(options['tamaño_promedio_cluster'])
+        average_cluster_mode = False
+    
+    if options['tamaño_minimo_cluster'] <= 1:
+        Min_Cluster_Length_multiplier = options['tamaño_minimo_cluster']
+        min_cluster_mode = True
+    else:
+        Min_Cluster_Length_st = int(options['tamaño_minimo_cluster'])
+        min_cluster_mode = False
+
+    Iterations_PostProcessing = options['Iteraciones_Shape_Refinement']
+
+    save = options['save']
+    save_images = options['save_images']
+    path_save = options['path_save']
+    path_params = options['path_params']
+    path_save_images = options['path_save_images']
+
+    print(f'---------Ley de corte usada: {ley_corte}---------\n')
+    fases_mina = sorted(mina['fase'].unique())
+    Tamaños_fase_banco = []
+    Tiempos_clusterizacion_fase_banco = []
+
+    contador_bancos = 1
+    contador_clusters = 0
+
+    Diccionario_Centros = dict()
+
+    for fase in fases_mina:
+        mini_mina = mina[mina['fase'] == fase]
+        bancos = sorted(mini_mina['banco'].unique())[::-1]
+        if penalizacion_c > 0:
+            res = Precedencia_Fase_Banco(mini_mina)
+            precedence_tree = defaultdict(list)
+            for node, predecessor in res:
+                precedence_tree[node].append(predecessor)
+                
+        if peso_directional_mining > 0:
+            cono = list( np.load(Path(path_params + f'cono_{fase}.npy')) )
+            # params_rampa = list( np.load(Path(path_params + f'rampa_{fase}.npy')) )
+
+            # z_min = Z_min(mini_mina, cono, area_minima_operativa)
+            # rampa = Rampa(cono, params_rampa, n=ref_ramp, z_min=z_min, ancho_rampa=ancho_rampa)
+
+            rampa = list( np.load(Path(path_params + f'puntos_rampa_{fase}.npy')) )
+
+            z_min = Z_min(mini_mina, cono, area_minima_operativa)
+            puntos_iniciales = Puntos_Iniciales(mini_mina, rampa, z_min)
+
+        for banco in bancos:
+            print(f'\n')
+            print(f'Fase-Banco N° {fase}-{banco}')
+            fase_banco = mina[(mina['fase'] == fase) & (mina['banco'] == banco)].copy()
+            z_fb = fase_banco['z'].values[0]
+
+            x_min = np.min(fase_banco['x'].values)-BlockWidthX
+            y_min = np.min(fase_banco['y'].values)-BlockWidthY
+            x_max = np.max(fase_banco['x'].values)+BlockWidthX
+            y_max = np.max(fase_banco['y'].values)+BlockWidthY
+
+            peso_directional_mining_new = peso_directional_mining
+            vector_mineria = []
+            if peso_directional_mining>0:
+                P1 = ()
+                for p in puntos_iniciales:
+                    if p[2]==z_fb:
+                        P1 = (p[0], p[1])
+                        alpha = (p[0] - x_min)/(x_max - x_min)
+                        beta = (p[1] - y_min)/(y_max - y_min)
+                        P2 = ( alpha*x_min + (1-alpha)*x_max, beta*y_min + (1-beta)*y_max)
+                        vector_mineria = (P1, P2)
+                        break
+
+                if len(P1)==0:
+                    # p = puntos_iniciales[0]
+                    # P1 = (p[0], p[1])
+                    # alpha = (p[0] - x_min)/(x_max - x_min)
+                    # beta = (p[1] - y_min)/(y_max - y_min)
+                    # P2 = (alpha*x_min + (1-alpha)*x_max, beta*y_min + (1-beta)*y_max)
+                    peso_directional_mining_new = 0
+
+
+            tamaño_fase_banco = len(fase_banco)
+            Tamaños_fase_banco.append(tamaño_fase_banco)
+            print(f'Tamaño de la fase-banco: {tamaño_fase_banco}')
+            
+
+            adjency_matrix = Calculate_Adjency_Matrix(fase_banco, BlockWidthX, BlockWidthY)
+            similarity_matrix = Calculate_Similarity_Matrix(
+                fase_banco, 
+                params={
+                    'peso_distancia': peso_distancia,
+                    'peso_ley': peso_ley,
+                    'tolerancia_ley': tol_ley,
+                    'peso_direccion_mineria': peso_directional_mining_new,
+                    'tolerancia_direccion_mineria': tol_directional_mining,
+                    'vector_mineria': vector_mineria,
+                    'penalizacion_destino': penalizacion_destino,
+                    'penalizacion_roca': penalizacion_roca
+                }
+                )
+            
+            if max_cluster_mode:
+                Max_Cluster_Length = int(Max_Cluster_Length_multiplier*tamaño_fase_banco)
+            else:
+                Max_Cluster_Length = Max_Cluster_Length_st
+            if average_cluster_mode:
+                Average_Cluster_Length = int(Average_Cluster_Length_multiplier*tamaño_fase_banco)
+            else:
+                Average_Cluster_Length = Average_Cluster_Length_st
+            if min_cluster_mode:
+                Min_Cluster_Length = int(Min_Cluster_Length_multiplier*tamaño_fase_banco)
+            else:
+                Min_Cluster_Length = Min_Cluster_Length_st
+
+            if Max_Cluster_Length==0:
+                mult = 2/3
+            else:
+                mult = Average_Cluster_Length/Max_Cluster_Length
+
+            # Max_Cluster_Length = int(0.1*tamaño_fase_banco)
+            # Average_Length_Cluster = int((2/3)*Max_Cluster_Length)
+            # Min_Cluster_Length = int(0.01*tamaño_fase_banco)
+
+            if Max_Cluster_Length < options['tolerancia_tamaño_maximo_cluster']:
+                Max_Cluster_Length = options['tolerancia_tamaño_maximo_cluster']
+                Average_Cluster_Length = int(mult*Max_Cluster_Length)
+            if Min_Cluster_Length < options['tolerancia_tamaño_minimo_cluster']:
+                Min_Cluster_Length = options['tolerancia_tamaño_minimo_cluster']
+
+            print(f'MaxCL: {Max_Cluster_Length}, AveCL: {Average_Cluster_Length}, MinCL: {Min_Cluster_Length}')
+
+            if ((fase,banco) in precedence_tree) and (penalizacion_c>0):
+                print(f"---Precedencias Detectadas")
+                print(precedence_tree[(fase,banco)])
+                dfs = [] # Lista para almacenar los dataframes precedentes
+                for (f_,b_) in precedence_tree[(fase,banco)]:
+                    dfs.append( (mina_clusterizada[(mina_clusterizada['fase']==f_)&(mina_clusterizada['banco']==b_)]).copy() )
+                offset=0
+                for df_ in dfs:
+                    if not df_.empty:
+                        # Ajustamos los clusters
+                        df_['cluster'] = df_['cluster'] + offset
+                        # Actualizamos el offset: suma el máximo cluster de este df
+                        offset = df_['cluster'].max()
+                
+                df_inf = pd.concat(dfs, ignore_index=True) #dataframe inferior a f,b
+                df_sup = fase_banco.copy()
+                df_sup.reset_index(drop=True, inplace=True)
+                df_sup['cluster'] = df_sup['id']
+                A_vertical = Calculate_Vertical_Adyacency_Matrix(df_sup,df_inf, BlockWidth=BlockWidthX/4, BlockHeight=BlockWidthY/4) # Tiene que ser estricto pues es para calcular C
+                # Ahora calculamos la matriz C
+                C = A_vertical@A_vertical.T
+                C = (1-C)*penalizacion_c+C
+                #Ahora la similaridad
+                similarity_matrix = similarity_matrix*C
+
+
+
+            fase_banco, execution_time_agg, N_Clusters_agg = Clustering_Tabesh(
+                fase_banco, adjency_matrix, similarity_matrix,
+                params={'Average_Length_Cluster': Average_Cluster_Length,
+                        'Max_Length_Cluster': Max_Cluster_Length}
+                )
+            
+            execution_time_ref = 0
+            N_Clusters_ref = N_Clusters_agg
+            if options['Shape_Refinement']=='Tabesh':
+                fase_banco, execution_time_ref, N_Clusters_ref = Shape_Refinement_Tabesh(
+                    fase_banco,
+                    adjency_matrix,
+                    Min_Cluster_Length=Min_Cluster_Length,
+                    Iterations_PostProcessing=Iterations_PostProcessing
+                )
+            elif options['Shape_Refinement']=='Modificado':
+                fase_banco, execution_time_ref, N_Clusters_ref = Shape_Refinement_Mod(
+                    fase_banco,
+                    adjency_matrix,
+                    Min_Cluster_Length=Min_Cluster_Length,
+                    Iterations_PostProcessing=Iterations_PostProcessing
+                )
+            
+            Clusters_Ordenados, fase_banco, Centers, execution_time_prec = Precedencias_Clusters_Agend(fase_banco, vector_mineria, BlockWidthX, BlockWidthY, Distance_Option=True)
+
+            Diccionario_Centros[(fase, banco)] = Centers
+
+            ru, ru_distribution = Rock_Unity(fase_banco)
+            ddf, ddf_distribution = Destination_Dilution_Factor(fase_banco)
+            cv, cv_distribution = Coefficient_Variation(fase_banco)
+
+            if contador_bancos == 1:
+                mina_clusterizada = fase_banco.copy()
+                metrics_df = pd.DataFrame(
+                    {'fase': fase, 
+                    'banco': banco, 
+                    'RU': ru, 
+                    'DDF': ddf, 
+                    'CV': cv, 
+                    'RU_dist': [ru_distribution],
+                    'DDF_dist': [ddf_distribution],
+                    'CV_dist': [cv_distribution]}
+                    )
+                precedences_df = pd.DataFrame({'fase': fase, 'banco': banco, 'cluster': [int(k) for k in Clusters_Ordenados.keys()], 'precedences': [[int(x) for x in v] for v in Clusters_Ordenados.values()]})
+            else:
+                mina_clusterizada = pd.concat([mina_clusterizada, fase_banco], ignore_index=True)
+                metrics_df = pd.concat(
+                    [metrics_df, 
+                    pd.DataFrame(
+                        {'fase': fase, 
+                        'banco': banco, 
+                        'RU': ru, 
+                        'DDF': ddf, 
+                        'CV': cv, 
+                        'RU_dist': [ru_distribution],
+                        'DDF_dist': [ddf_distribution],
+                        'CV_dist': [cv_distribution]}
+                    )], 
+                    ignore_index=True)
+
+                precedences_df = pd.concat(
+                    [precedences_df, 
+                    pd.DataFrame(
+                        {'fase': fase, 
+                        'banco': banco, 
+                        'cluster': [int(k) for k in Clusters_Ordenados.keys()], 
+                        'precedences': [[int(x) for x in v] for v in Clusters_Ordenados.values()]}
+                        )], 
+                    ignore_index=True)
+
+            contador_bancos += 1
+            contador_clusters += N_Clusters_ref
+            tiempo_ejecucion = execution_time_agg + execution_time_ref + execution_time_prec
+            Tiempos_clusterizacion_fase_banco.append(tiempo_ejecucion)
+
+            if save_images:
+                path_image = path_save_images
+                
+
+                plot_fase_banco(fase_banco, column_hue='cluster', params={
+                    'BlockWidthX': BlockWidthX,
+                    'BlockWidthY': BlockWidthY,
+                    'dpi': 150,
+                    'flechas': [vector_mineria] if len(vector_mineria)>0 else [],
+                    'precedencias': Clusters_Ordenados,
+                    'centros': Centers,
+                    'guardar_imagen': True,
+                    'path': path_image
+                })
+            
+    print(f'Clusters creados: {contador_clusters}')
+    print(f'Tiempo total de ejecucion: {sum(Tiempos_clusterizacion_fase_banco)}')
+
+    if save:
+        path_arch = Path(path_save + 'mina_clusterizada.csv')
+        path_arch.parent.mkdir(parents=True, exist_ok=True)
+
+        mina_clusterizada.to_csv(path_arch, index=False)
+        metrics_df.to_csv(Path(path_save + 'metricas.csv'), index=False)
+        precedences_df.to_csv(Path(path_save + 'precedencias.csv'), index=False)
+
+        sizes = np.array(Tamaños_fase_banco)
+        pd.DataFrame(sizes).to_csv(Path(path_save + 'sizes.csv'), index=False)
+
+        times = np.array(Tiempos_clusterizacion_fase_banco)
+        pd.DataFrame(times).to_csv(Path(path_save + 'execution_times.csv'), index=False)
+    
+
+    return mina_clusterizada

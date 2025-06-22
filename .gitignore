@@ -15,11 +15,13 @@ gurobi.lic
 # Archivos de sistema
 .DS_Store
 
+# Carpetas
+Params/
+
 # Archivos mina
 CP_fases.txt
 
 # Archivos
-
 Final_pit.ipynb
 corner_alg.ipynb
 Conos_y_rampas.ipynb
