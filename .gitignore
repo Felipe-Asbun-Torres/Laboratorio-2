@@ -18,9 +18,12 @@ gurobi.lic
 # Archivos mina
 CP_fases.txt
 
-# Archivo xd
+# Archivos
 
+Final_pit.ipynb
 corner_alg.ipynb
+Conos_y_rampas.ipynb
+ValidacionRampa.ipynb
 #DCS_model.ipynb
 
 # Extensiones varias
@@ -29,4 +32,7 @@ corner_alg.ipynb
 *.pdf
 *.sol
 *.Identifier
-
+*.txt
+*.edp
+*.npy
+*.idp

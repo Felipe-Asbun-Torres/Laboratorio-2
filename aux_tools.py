@@ -11,6 +11,9 @@ import plotly.colors
 import numpy.matlib as matlib
 import scipy as sp
 from collections import defaultdict
+from concurrent.futures import ProcessPoolExecutor
+from multiprocessing import Pool, cpu_count
+import mine_tools as mt
 
 def plot_cluster_precedence(
     df1,
@@ -927,6 +930,7 @@ def Calculate_Arcs(df_sup, df_inf, BlockWidth=10, BlockHeight=10, arcs=defaultdi
     return arcs
 
 def Precedencia_Fase_Banco(df):
+    df = df.copy()
     # Obtener los valores únicos ordenados de 'z'
     sorted_unique_z = np.sort(df['z'].unique())
 
@@ -937,7 +941,7 @@ def Precedencia_Fase_Banco(df):
     for f in fases_a_procesar:
         benches = np.sort(df[df['fase']==f]['banco'].unique())
         for b in benches:
-            df_inf = df[(df['fase']==f)&(df['banco']==b)].copy()
+            df_inf = df[(df['fase']==f)&(df['banco']==b)]
             df_inf.reset_index(drop=True, inplace=True)
             z_level = df_inf['nivel'][0]
             min_x = df_inf['x'].min()
@@ -1017,8 +1021,10 @@ def Calculate_Vertical_Adyacency_Matrix(df_sup, df_inf, BlockWidth=10, BlockHeig
     Y2 = matlib.repmat(y2.reshape(1, len(y2)), len(y1), 1)  # (n_sup, n_inf)
 
 
-    D = np.sqrt((1/BlockWidth**2)*(X1 - X2)**2 + (1/BlockHeight**2)*(Y1 - Y2)**2)
-    adjency_matrix = (D <= 1) & (D > 0)
+    Dx = np.abs((1/BlockWidth)*(X1 - X2))
+    Dy = np.abs((1/BlockHeight)*(Y1 - Y2))
+    adjency_matrix = (np.sqrt(Dx**2 + Dy**2)<=1) # Distancia euclidiana normalizada
+    # adjency_matrix = (Dx <= 1) & (Dy <= 1) # Mide la adyacencia por direcciones X e Y, usando 1, dos bloques son adyacentes si están a una distancia de 1 bloque o menos
 
     # adjency_matrix = (D <= BlockWidth) & (D > 0)
     adjency_matrix = sp.sparse.csr_matrix(adjency_matrix).astype(int)
@@ -1049,3 +1055,81 @@ def Calculate_Vertical_Adyacency_Matrix(df_sup, df_inf, BlockWidth=10, BlockHeig
 
 
     return A_clusters
+
+'''
+Metodo de clustering de toda una mina, con opciones para armar la matriz de similaridad, usar shape refinement, etc.
+'''
+def mine_clustering(df, BlockWidth = 10, BlockHeight = 10, params=dict()):
+    params.setdefault('penalizacion_c', 0.5)
+    c_coef = params['penalizacion_c']
+    df['cluster'] = -1
+    sorted_unique_z = np.sort(df['z'].unique()) #Orden ascendente de z
+    
+    res = Precedencia_Fase_Banco(df)
+    precedence_tree = defaultdict(list)
+    for node, predecessor in res:
+        precedence_tree[node].append(predecessor)
+
+    for z in sorted_unique_z:
+        print(f"---Procesando Z={z}")
+        sliced_df = df[df['z']==z]
+        lista_fases_bancos = list((sliced_df[['fase', 'banco']].drop_duplicates()).itertuples(index=False, name=None)) # Lista de tuplas únicas de (fase, banco) en z
+        for (f,b) in lista_fases_bancos:
+            print(f"========Procesando Fase {f} - Banco {b}========")
+            slice_fase_banco = sliced_df[(sliced_df['fase']==f) & (sliced_df['banco']==b)]
+            A = mt.Calculate_Adjency_Matrix(slice_fase_banco, BlockWidthX=BlockWidth, BlockWidthY=BlockHeight)
+            S = mt.Calculate_Similarity_Matrix(slice_fase_banco, params=params)
+            if (f,b) not in precedence_tree: # Si no hay precedencias verticales
+                print(f"---No hay precedencias verticales")
+                fase_banco_clusterizado = mt.Clustering_Tabesh(slice_fase_banco, A, S, params=params)[0]
+                df.loc[fase_banco_clusterizado.index, 'cluster'] = fase_banco_clusterizado['cluster'] # Asignar clusters al df original
+
+            if (f,b) in precedence_tree: # Si hay precedencias verticales
+                print(f"---Precedencias Detectadas")
+                print(precedence_tree[(f,b)])
+                dfs = [] # Lista para almacenar los dataframes precedentes
+                for (f_,b_) in precedence_tree[(f,b)]:
+                    dfs.append( (df[(df['fase']==f_)&(df['banco']==b_)]).copy() )
+                offset=0
+                for df_ in dfs:
+                    if not df_.empty:
+                        # Ajustamos los clusters
+                        df_['cluster'] = df_['cluster'] + offset
+                        # Actualizamos el offset: suma el máximo cluster de este df
+                        offset = df_['cluster'].max()
+                
+                df_inf = pd.concat(dfs, ignore_index=True) #dataframe inferior a f,b
+                df_sup = slice_fase_banco.copy()
+                df_sup.reset_index(drop=True, inplace=True)
+                df_sup['cluster'] = df_sup['id']
+                A_vertical = Calculate_Vertical_Adyacency_Matrix(df_sup,df_inf, BlockWidth=BlockWidth/4, BlockHeight=BlockHeight/4) # Tiene que ser estricto pues es para calcular C
+                # Ahora calculamos la matriz C
+                C = A_vertical@A_vertical.T
+                C = (1-C)*c_coef+C
+                #Ahora la similaridad
+                S = S*C
+                print(f"---Clustering de Fase {f} - Banco {b}")
+                fase_banco_clusterizado = mt.Clustering_Tabesh(slice_fase_banco, A, S, params=params)[0]
+                df.loc[fase_banco_clusterizado.index, 'cluster'] = fase_banco_clusterizado['cluster'] # Asignar clusters al df original
+    return df
+# Función auxiliar para empaquetar los argumentos
+def clustering_wrapper(args):
+    mina_df, BlockWidth, BlockHeight, params = args
+    return mine_clustering(mina_df, BlockWidth, BlockHeight, params)
+
+def mine_clustering_parallel(df, BlockWidth = 10, BlockHeight = 10, params=dict()):
+    # Separamos por fase
+    fases = np.sort(df['fase'].unique())
+    lista_minas = [df[df['fase'] == f].copy() for f in fases]
+
+    # Empaquetamos argumentos para cada fase
+    args_list = [(mina, BlockWidth, BlockHeight, params) for mina in lista_minas]
+
+    # Procesamos en paralelo
+    with Pool(cpu_count()) as pool:
+        resultados = pool.map(clustering_wrapper, args_list)
+
+    # Opcional: juntar todo en un solo DataFrame
+    resultado_final = pd.concat(resultados, ignore_index=True)
+    return resultado_final
+

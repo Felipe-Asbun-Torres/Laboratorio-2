@@ -3323,3 +3323,118 @@ def Clustering(mina, cm=2, cr=0.25, cp=10, P=4, R=0.85, ley_corte=0.142303657862
     
 
     return mina_clusterizada
+
+
+
+def Calculate_Arcs(df_sup, df_inf, BlockWidth=10, BlockHeight=10, arcs=defaultdict(list)):
+    '''
+    Asume que el df_inf corresponde a la fase banco inferior a df_sup, calcula los arcos de precedencia verticales
+    '''
+    A_clusters = Calculate_Vertical_Adyacency_Matrix(df_sup, df_inf, BlockWidth=BlockWidth, BlockHeight=BlockHeight)
+    f_inf = df_inf['fase'][0]
+    b_inf = df_inf['banco'][0]
+    f_sup = df_sup['fase'][0]
+    b_sup = df_sup['banco'][0]
+    for i in range(A_clusters.shape[1]):  # i: índice de clusters inferiores
+        for j in range(A_clusters.shape[0]):  # j: índice de clusters superiores
+            if A_clusters.T[i][j] == 1:
+                arcs[(int(f_inf), int(b_inf), i + 1)].append((int(f_sup), int(b_sup), j + 1))
+
+    return arcs
+
+def Precedencia_Fase_Banco(df):
+    df = df.copy()
+    # Obtener los valores únicos ordenados de 'z'
+    sorted_unique_z = np.sort(df['z'].unique())
+
+    # Crear una nueva columna 'nivel' basada en la posición de 'z' en el array ordenado
+    df['nivel'] = df['z'].apply(lambda x: np.where(sorted_unique_z == x)[0][0])
+    info_fb = {}
+    fases_a_procesar = np.sort(df['fase'].unique())
+    for f in fases_a_procesar:
+        benches = np.sort(df[df['fase']==f]['banco'].unique())
+        for b in benches:
+            df_inf = df[(df['fase']==f)&(df['banco']==b)]
+            df_inf.reset_index(drop=True, inplace=True)
+            z_level = df_inf['nivel'][0]
+            min_x = df_inf['x'].min()
+            max_x = df_inf['x'].max()
+            min_y = df_inf['y'].min()
+            max_y = df_inf['y'].max()
+            info_fb[(int(f),int(b))] = (z_level, min_x, max_x, min_y,max_y)
+
+    # Lista para guardar los pares (f_i, b_i) y (f_j, b_j) que cumplen la condición
+    resultados = []
+
+    # Iterar sobre todos los pares (f1, b1) y (f2, b2)
+    for (f1, b1), (z1, min_x1, max_x1, min_y1, max_y1) in info_fb.items():
+        for (f2, b2), (z2, min_x2, max_x2, min_y2, max_y2) in info_fb.items():
+            # Condición 1: z1 == z2+1 (es necesario que )
+            if z1 == z2+1:
+                # Condición 2: Los cuadros delimitados por (x, y) se intersectan
+                if (min_x1 <= max_x2 and max_x1 >= min_x2) and (min_y1 <= max_y2 and max_y1 >= min_y2):
+                    resultados.append(((f1, b1), (f2, b2)))
+    return resultados
+def Global_Vertical_Arc_Calculation(df):
+    resultados = Precedencia_Fase_Banco(df)
+    arcs = defaultdict(list)
+    # Iterar
+    for par in resultados:
+        ((f_sup,b_sup),(f_inf,b_inf)) = par
+        df_inf = df[(df['fase']==f_inf)&(df['banco']==b_inf)].copy()
+        df_inf.reset_index(drop=True, inplace=True)
+        df_sup = df[(df['fase']==f_sup)&(df['banco']==b_sup)].copy()
+        df_sup.reset_index(drop=True, inplace=True)
+        arcs = Calculate_Arcs(df_sup,df_inf,arcs=arcs)
+    return arcs
+
+def Calculate_Vertical_Adyacency_Matrix(df_sup, df_inf, BlockWidth=10, BlockHeight=10, arcs=defaultdict(list), cluster_col='cluster'):
+    '''
+    Asume que el df_inf corresponde a la fase banco inferior a df_sup, calcula los arcos de precedencia verticales
+    '''
+    x1 = df_sup['x'].values
+    y1 = df_sup['y'].values
+    x2 = df_inf['x'].values
+    y2 = df_inf['y'].values
+
+    X1 = matlib.repmat(x1.reshape(len(x1), 1), 1, len(x2))  # (n_sup, n_inf)
+    X2 = matlib.repmat(x2.reshape(1, len(x2)), len(x1), 1)  # (n_sup, n_inf)
+
+    Y1 = matlib.repmat(y1.reshape(len(y1), 1), 1, len(y2))  # (n_sup, n_inf)
+    Y2 = matlib.repmat(y2.reshape(1, len(y2)), len(y1), 1)  # (n_sup, n_inf)
+
+
+    Dx = np.abs((1/BlockWidth)*(X1 - X2))
+    Dy = np.abs((1/BlockHeight)*(Y1 - Y2))
+    adjency_matrix = (np.sqrt(Dx**2 + Dy**2)<=1) # Distancia euclidiana normalizada
+    # adjency_matrix = (Dx <= 1) & (Dy <= 1) # Mide la adyacencia por direcciones X e Y, usando 1, dos bloques son adyacentes si están a una distancia de 1 bloque o menos
+
+    # adjency_matrix = (D <= BlockWidth) & (D > 0)
+    adjency_matrix = sp.sparse.csr_matrix(adjency_matrix).astype(int)
+
+    # Obtener clusters únicos y sus índices
+    clusters_sup = df_sup[cluster_col].unique()
+    clusters_inf = df_inf[cluster_col].unique()
+
+    cluster_sup_to_idx = {c: i for i, c in enumerate(clusters_sup)}
+    cluster_inf_to_idx = {c: i for i, c in enumerate(clusters_inf)}
+
+    n_sup = len(clusters_sup)
+    n_inf = len(clusters_inf)
+
+    # Inicializar matriz de adyacencia entre clusters
+    A_clusters = np.zeros((n_sup, n_inf), dtype=int)
+
+    # Recorrer los pares adyacentes entre bloques
+    rows, cols = adjency_matrix.nonzero()  # A_block: sup x inf
+    for i_sup, i_inf in zip(rows, cols):
+        c_sup = df_sup.iloc[i_sup][cluster_col]
+        c_inf = df_inf.iloc[i_inf][cluster_col]
+
+        idx_sup = cluster_sup_to_idx[c_sup]
+        idx_inf = cluster_inf_to_idx[c_inf]
+
+        A_clusters[idx_sup, idx_inf] = 1
+
+
+    return A_clusters
