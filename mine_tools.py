@@ -22,6 +22,8 @@ from functools import partial
 
 from pathlib import Path
 
+from multiprocessing import Pool, cpu_count
+
 
 ###############################################################
 ##################### Plotting Functions ######################
@@ -3642,31 +3644,31 @@ def Clustering_mod(mina, cm=2, cr=0.25, cp=10, P=4, R=0.85, ley_corte=0.14230365
                 Min_Cluster_Length = options['tolerancia_tamaño_minimo_cluster']
 
             print(f'MaxCL: {Max_Cluster_Length}, AveCL: {Average_Cluster_Length}, MinCL: {Min_Cluster_Length}')
-
-            if ((fase,banco) in precedence_tree) and (penalizacion_c>0):
-                print(f"---Precedencias Detectadas")
-                print(precedence_tree[(fase,banco)])
-                dfs = [] # Lista para almacenar los dataframes precedentes
-                for (f_,b_) in precedence_tree[(fase,banco)]:
-                    dfs.append( (mina_clusterizada[(mina_clusterizada['fase']==f_)&(mina_clusterizada['banco']==b_)]).copy() )
-                offset=0
-                for df_ in dfs:
-                    if not df_.empty:
-                        # Ajustamos los clusters
-                        df_['cluster'] = df_['cluster'] + offset
-                        # Actualizamos el offset: suma el máximo cluster de este df
-                        offset = df_['cluster'].max()
-                
-                df_inf = pd.concat(dfs, ignore_index=True) #dataframe inferior a f,b
-                df_sup = fase_banco.copy()
-                df_sup.reset_index(drop=True, inplace=True)
-                df_sup['cluster'] = df_sup['id']
-                A_vertical = Calculate_Vertical_Adyacency_Matrix(df_sup,df_inf, BlockWidth=BlockWidthX/4, BlockHeight=BlockWidthY/4) # Tiene que ser estricto pues es para calcular C
-                # Ahora calculamos la matriz C
-                C = A_vertical@A_vertical.T
-                C = (1-C)*penalizacion_c+C
-                #Ahora la similaridad
-                similarity_matrix = similarity_matrix*C
+            if (penalizacion_c>0):
+                if ((fase,banco) in precedence_tree):
+                    print(f"---Precedencias Detectadas")
+                    print(precedence_tree[(fase,banco)])
+                    dfs = [] # Lista para almacenar los dataframes precedentes
+                    for (f_,b_) in precedence_tree[(fase,banco)]:
+                        dfs.append( (mina_clusterizada[(mina_clusterizada['fase']==f_)&(mina_clusterizada['banco']==b_)]).copy() )
+                    offset=0
+                    for df_ in dfs:
+                        if not df_.empty:
+                            # Ajustamos los clusters
+                            df_['cluster'] = df_['cluster'] + offset
+                            # Actualizamos el offset: suma el máximo cluster de este df
+                            offset = df_['cluster'].max()
+                    
+                    df_inf = pd.concat(dfs, ignore_index=True) #dataframe inferior a f,b
+                    df_sup = fase_banco.copy()
+                    df_sup.reset_index(drop=True, inplace=True)
+                    df_sup['cluster'] = df_sup['id']
+                    A_vertical = Calculate_Vertical_Adyacency_Matrix(df_sup,df_inf, BlockWidth=BlockWidthX/4, BlockHeight=BlockWidthY/4) # Tiene que ser estricto pues es para calcular C
+                    # Ahora calculamos la matriz C
+                    C = A_vertical@A_vertical.T
+                    C = (1-C)*penalizacion_c+C
+                    #Ahora la similaridad
+                    similarity_matrix = similarity_matrix*C
 
 
 
@@ -3779,3 +3781,25 @@ def Clustering_mod(mina, cm=2, cr=0.25, cp=10, P=4, R=0.85, ley_corte=0.14230365
     
 
     return mina_clusterizada
+
+# Función auxiliar para empaquetar los argumentos
+def clustering_wrapper(args):
+    minimina, cm, cr, cp, P, R, ley_corte, options = args
+    return Clustering_mod(minimina, cm=cm, cr=cr, cp=cp, P=P, R=R, ley_corte=ley_corte, options=options)
+
+def Clustering_parallel(mina,cm=2, cr=0.25, cp=10, P=4, R=0.85, ley_corte=0.1423036578621615,
+               options=dict()):
+    # Separamos por fase
+    fases = np.sort(mina['fase'].unique())
+    lista_minas = [mina[mina['fase'] == f].copy() for f in fases]
+
+    # Empaquetamos argumentos para cada fase
+    args_list = [(minimina, cm, cr, cp, P, R, ley_corte, options) for minimina in lista_minas]
+
+    # Procesamos en paralelo
+    with Pool(cpu_count()) as pool:
+        resultados = pool.map(clustering_wrapper, args_list)
+
+    # Opcional: juntar todo en un solo DataFrame
+    resultado_final = pd.concat(resultados, ignore_index=True)
+    return resultado_final
