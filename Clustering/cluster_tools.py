@@ -2016,6 +2016,64 @@ def plot_precedencias_verticales_3D(
     fig.show()
 
 
+def animate_fase_banco(history, column_hue='cluster', params=dict(), save_path=None, fps=2, real_steps=None):
+    """
+    Anima la evolución de una clusterización en una fase-banco.
+
+    Parámetros
+    ----------
+    history : list of pandas.DataFrame
+        Lista de DataFrames con la evolución del clusterizado en cada paso.
+    column_hue : str, opcional
+        Nombre de la columna para colorear los clusters. Por defecto 'cluster'.
+    params : dict, opcional
+        Parámetros para la función de graficado `plot_fase_banco`. Se añaden valores por defecto.
+    save_path : str o None, opcional
+        Ruta para guardar la animación. Si es None, se muestra la animación en pantalla.
+    fps : int, opcional
+        Fotogramas por segundo de la animación guardada. Por defecto 2.
+    real_steps : list o None, opcional
+        Lista con los números reales de pasos para mostrar en el título. Si None, usa índice + 1.
+
+    Retorna
+    -------
+    matplotlib.animation.FuncAnimation
+        Objeto de la animación generada.
+    """
+    if not history:
+        raise ValueError("La historia de clusterización está vacía.")
+    
+    plot_params = deepcopy(params)
+    plot_params.setdefault('xsize', 10)
+    plot_params.setdefault('ysize', 10)
+    plot_params.setdefault('dpi', 100)
+    plot_params['guardar_imagen'] = False  # Nunca guardar dentro de plot
+
+    fig, ax = plt.subplots(figsize=(plot_params['xsize'], plot_params['ysize']), dpi=plot_params['dpi'])
+
+    def update(frame):
+        ax.clear()
+        df = history[frame]
+        plot_fase_banco(df, column_hue=column_hue, text_hue=None, params=plot_params, ax=ax)
+
+        paso = real_steps[frame] if real_steps else frame + 1
+        ax.set_title(f'Paso {paso} - Clusters: {df[column_hue].nunique()}')
+
+        return ax,
+
+    ani = FuncAnimation(fig, update, frames=len(history), blit=False, repeat=False)
+
+    if save_path:
+        if save_path.endswith('.gif'):
+            ani.save(save_path, writer='pillow', fps=fps)
+        elif save_path.endswith('.mp4'):
+            ani.save(save_path, writer='ffmpeg', fps=fps)
+        else:
+            raise ValueError("El archivo debe tener extensión '.mp4' o '.gif'")
+    else:
+        plt.show()
+
+    return ani
 
 ######################################################
 ################# Metrics Functions ##################
@@ -2379,66 +2437,6 @@ def Shape_Refinement_Mod(FaseBanco, AdjencyMatrix, Min_Cluster_Length = 10, Iter
     fase_banco.index.name = None
 
     return fase_banco, execution_time, N_Clusters
-
-
-def animate_fase_banco(history, column_hue='cluster', params=dict(), save_path=None, fps=2, real_steps=None):
-    """
-    Anima la evolución de una clusterización en una fase-banco.
-
-    Parámetros
-    ----------
-    history : list of pandas.DataFrame
-        Lista de DataFrames con la evolución del clusterizado en cada paso.
-    column_hue : str, opcional
-        Nombre de la columna para colorear los clusters. Por defecto 'cluster'.
-    params : dict, opcional
-        Parámetros para la función de graficado `plot_fase_banco`. Se añaden valores por defecto.
-    save_path : str o None, opcional
-        Ruta para guardar la animación. Si es None, se muestra la animación en pantalla.
-    fps : int, opcional
-        Fotogramas por segundo de la animación guardada. Por defecto 2.
-    real_steps : list o None, opcional
-        Lista con los números reales de pasos para mostrar en el título. Si None, usa índice + 1.
-
-    Retorna
-    -------
-    matplotlib.animation.FuncAnimation
-        Objeto de la animación generada.
-    """
-    if not history:
-        raise ValueError("La historia de clusterización está vacía.")
-    
-    plot_params = deepcopy(params)
-    plot_params.setdefault('xsize', 10)
-    plot_params.setdefault('ysize', 10)
-    plot_params.setdefault('dpi', 100)
-    plot_params['guardar_imagen'] = False  # Nunca guardar dentro de plot
-
-    fig, ax = plt.subplots(figsize=(plot_params['xsize'], plot_params['ysize']), dpi=plot_params['dpi'])
-
-    def update(frame):
-        ax.clear()
-        df = history[frame]
-        plot_fase_banco(df, column_hue=column_hue, text_hue=None, params=plot_params, ax=ax)
-
-        paso = real_steps[frame] if real_steps else frame + 1
-        ax.set_title(f'Paso {paso} - Clusters: {df[column_hue].nunique()}')
-
-        return ax,
-
-    ani = FuncAnimation(fig, update, frames=len(history), blit=False, repeat=False)
-
-    if save_path:
-        if save_path.endswith('.gif'):
-            ani.save(save_path, writer='pillow', fps=fps)
-        elif save_path.endswith('.mp4'):
-            ani.save(save_path, writer='ffmpeg', fps=fps)
-        else:
-            raise ValueError("El archivo debe tener extensión '.mp4' o '.gif'")
-    else:
-        plt.show()
-
-    return ani
 
 
 
@@ -2810,9 +2808,28 @@ def Precedencia_Fase_Banco(df):
 
 def Puntos_Iniciales(mina, rampa, 
                      z_min=None, debug=False):
+    """
+    Obtiene los puntos iniciales de excavación desde una curva de rampa, a partir de un nivel mínimo.
+
+    Parámetros
+    ----------
+    mina : pandas.DataFrame
+        DataFrame que contiene al menos la columna 'z' (altitud).
+    rampa : tuple of arrays
+        Tupla con tres arrays (X_curve, Y_curve, Z_curve) que describen la curva de la rampa.
+    z_min : float, opcional
+        Altura mínima a considerar. Si no se especifica, se usa el valor mínimo de 'z' en `mina`.
+    debug : bool, opcional
+        Si es True, imprime información útil para depuración.
+
+    Retorna
+    -------
+    puntos_iniciales : list of tuple
+        Lista de tuplas (x, y, z) con las coordenadas de los puntos iniciales a distintas alturas.
+    """
     X_curve, Y_curve, Z_curve = rampa
 
-    if not z_min:
+    if z_min is None:
         z_min = mina['z'].min()
 
     alturas = mina['z'].unique()
