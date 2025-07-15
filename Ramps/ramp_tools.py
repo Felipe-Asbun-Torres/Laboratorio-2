@@ -5,13 +5,14 @@ import scipy as sp
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import matplotlib.colors as mcolors 
+
 import time
 import os
 import numba as nb
 import numbers
 
 from matplotlib.animation import FuncAnimation
-import matplotlib.cm as cm
+import matplotlib.cm as cm 
 
 import plotly.graph_objects as go
 
@@ -237,7 +238,7 @@ def Best_Cone_by_Profit_diff_evol(mina, mina_rellena, max_global_angle=45, min_a
 ###############################################################
 
 def Rampa(cono, params_rampa, z_min=None, n_por_vuelta=100, max_vueltas=3, 
-          return_final_theta_z=False, shift=0, BlockWidthX=10, BlockWidthY=10, z_top=None):
+          return_final_theta_z=False, shift=0, BlockWidthX=10, BlockWidthY=10, z_top=None, len_seccion=None):
     """
     Genera la trayectoria tridimensional (rampa helicoidal) dentro de un cono truncado.
 
@@ -281,11 +282,19 @@ def Rampa(cono, params_rampa, z_min=None, n_por_vuelta=100, max_vueltas=3,
     p = -descenso
     a, b, h, alpha_cone, x_cone, y_cone, z_c = cono
 
+    
+
     if z_top is not None:
         a = a*(1 - z_c/h + z_top/h)
         b = b*(1 - z_c/h + z_top/h)
         h = h - (z_c - z_top)
         z_c = z_top
+
+    if z_min is not None:
+        if z_min > z_c:
+            if return_final_theta_z:
+                return [], [], [], theta_0, z_c
+            return [], [], []
 
     N = n_por_vuelta
 
@@ -310,16 +319,20 @@ def Rampa(cono, params_rampa, z_min=None, n_por_vuelta=100, max_vueltas=3,
     else:
         shift = tuple([shift])*N
 
-    x = (a*np.cos(theta_0)*np.cos(alpha_cone) - b*np.sin(theta_0)*np.sin(alpha_cone)) 
-    y = (a*np.cos(theta_0)*np.sin(alpha_cone) + b*np.sin(theta_0)*np.cos(alpha_cone)) 
+    x = (a*np.cos(theta)*np.cos(alpha_cone) - b*np.sin(theta)*np.sin(alpha_cone)) 
+    y = (a*np.cos(theta)*np.sin(alpha_cone) + b*np.sin(theta)*np.cos(alpha_cone)) 
 
-    x = x*(1+shift[0]*norm_ell*np.cos(theta+alpha_cone)/np.linalg.norm((x,y))) + x_cone
-    y = y*(1+shift[0]*norm_ell*np.sin(theta+alpha_cone)/np.linalg.norm((x,y))) + y_cone
+    i = 0
+
+    x_new = x*(1+shift[i]*norm_ell/np.linalg.norm((x,y)))
+    y_new = y*(1+shift[i]*norm_ell/np.linalg.norm((x,y)))
+
+    x = x_new + x_cone
+    y = y_new + y_cone
 
     X_curve.append(x); Y_curve.append(y); Z_curve.append(z)
 
     stop = False
-    i = 0
     for t in T:
         if t == 0:
             t0 = 0
@@ -347,8 +360,11 @@ def Rampa(cono, params_rampa, z_min=None, n_por_vuelta=100, max_vueltas=3,
             x = (a*np.cos(theta_new)*np.cos(alpha_cone) - b*np.sin(theta_new)*np.sin(alpha_cone))*(1-z_c/h+z_new/h)
             y = (a*np.cos(theta_new)*np.sin(alpha_cone) + b*np.sin(theta_new)*np.cos(alpha_cone))*(1-z_c/h+z_new/h)
 
-            x = x*(1+shift[i]*norm_ell*np.cos(theta_new+alpha_cone)/np.linalg.norm((x,y))) + x_cone
-            y = y*(1+shift[i]*norm_ell*np.sin(theta_new+alpha_cone)/np.linalg.norm((x,y))) + y_cone
+            x_new = x*(1+shift[i]*norm_ell/np.linalg.norm((x,y)))
+            y_new = y*(1+shift[i]*norm_ell/np.linalg.norm((x,y)))
+
+            x = x_new + x_cone
+            y = y_new + y_cone
 
             X_curve.append(x); Y_curve.append(y); Z_curve.append(z_new)
 
@@ -371,8 +387,8 @@ def Rampa(cono, params_rampa, z_min=None, n_por_vuelta=100, max_vueltas=3,
 
 
 def Rampa_Carril(cono, params_rampa, shift, z_min=None, n_por_vuelta=100, max_vueltas=3, 
-                 return_final_theta_z=False, 
-                 BlockWidthX=10, BlockWidthY=10, arco_seccion=np.pi/2
+                 return_final_theta_z=False, return_sep=False,
+                 BlockWidthX=10, BlockWidthY=10, arco_seccion=np.pi/2, len_seccion=None
                  ):
     """
     Genera una rampa compuesta por múltiples segmentos helicoidales que pueden variar su desplazamiento lateral.
@@ -422,9 +438,21 @@ def Rampa_Carril(cono, params_rampa, shift, z_min=None, n_por_vuelta=100, max_vu
     """
     theta_0, descenso, orientacion = params_rampa
 
-    X_curve = []; Y_curve = []; Z_curve = []
+    a, b, h, alpha_cone, x_cone, y_cone, z_c = cono
 
-    N_shift = int(2*np.pi/(arco_seccion)*max_vueltas)
+    X_curve = []; Y_curve = []; Z_curve = []
+    rampas = []
+
+    arcsecc = arco_seccion
+    if len_seccion is not None:
+        m = ((a-b)**2)/((a+b)**2)
+        perimeter = np.pi*(a+b)*(1+3*m/(10+np.sqrt(4-3*m)))
+        arco_seccion_loc = (len_seccion/perimeter)*2*np.pi
+        arcsecc = np.min((arco_seccion, arco_seccion_loc))
+
+    print(arcsecc)
+    N_shift = int(2*np.pi/(arcsecc)*max_vueltas)+1
+    print(N_shift)
     len_shift = len(shift)
     if len_shift < N_shift:
         shift = ((N_shift//len_shift + 1)*tuple(shift))[:N_shift]
@@ -434,36 +462,55 @@ def Rampa_Carril(cono, params_rampa, shift, z_min=None, n_por_vuelta=100, max_vu
     else:
         orientacion = -1
 
-    n_trozo = int((arco_seccion/(2*np.pi))*n_por_vuelta)
+    n_trozo = int((arcsecc/(2*np.pi))*n_por_vuelta)
+    print(n_trozo)
 
     i = 0
     for sh in shift:
         if i==0:
+            z_f = z_c
+
+        a_ell = a*(1 - z_c/h + z_f/h)
+        b_ell = b*(1 - z_c/h + z_f/h)
+
+        m = ((a_ell-b_ell)**2)/((a_ell+b_ell)**2)
+        perimeter = np.pi*(a_ell+b_ell)*(1 + 3*m/(10 + np.sqrt(4-3*m)))
+        arco_seccion_loc = (len_seccion/perimeter)*2*np.pi
+        arcsecc = np.min((arco_seccion, arco_seccion_loc))
+
+        if i==0:
             x_rampa, y_rampa, z_rampa, theta_f, z_f = Rampa(cono, params_rampa, 
-                                                       z_min=z_min, n_por_vuelta=n_trozo, max_vueltas=arco_seccion/(2*np.pi),
+                                                       z_min=z_min, n_por_vuelta=n_trozo, max_vueltas=arcsecc/(2*np.pi),
                                                        return_final_theta_z=True, shift=sh,
-                                                       BlockWidthX=BlockWidthX, BlockWidthY=BlockWidthY)
+                                                       BlockWidthX=BlockWidthX, BlockWidthY=BlockWidthY, len_seccion=len_seccion)
             
             X_curve += x_rampa; Y_curve += y_rampa; Z_curve += z_rampa
+            rampas.append([x_rampa, y_rampa, z_rampa, sh])
             previous_shift = sh
 
-            
         else:
             if previous_shift != sh:
                 s = (previous_shift, sh)
             else:
                 s = sh
-            
+
             x_rampa, y_rampa, z_rampa, theta_f, z_f = Rampa(cono, (theta_f, descenso, orientacion), 
-                                                    z_min=z_min, n_por_vuelta=n_trozo, max_vueltas=arco_seccion/(2*np.pi),
+                                                    z_min=z_min, n_por_vuelta=n_trozo, max_vueltas=arcsecc/(2*np.pi),
                                                     return_final_theta_z=True, shift=s,
                                                     BlockWidthX=BlockWidthX, BlockWidthY=BlockWidthY,
                                                     z_top=z_f)
             
             X_curve += x_rampa; Y_curve += y_rampa; Z_curve += z_rampa
+            rampas.append([x_rampa, y_rampa, z_rampa, s])
             previous_shift = sh
-
+        
+        if (z_min is not None) and (len(z_rampa)>0):
+            if z_min > z_rampa[-1]:
+                break
         i+=1
+
+    if return_sep:
+        return rampas
 
     if return_final_theta_z:
         return X_curve, Y_curve, Z_curve, theta_f, z_f
@@ -533,6 +580,7 @@ def precedences_supp(
         is_precise |= arriba & (dist <= z_rel)
         is_supp |= abajo & (dist <= z_rel_down)
     return ids[is_precise], ids[is_supp]
+
 
 def total_additional_blocks_numba(mina_rellena, rampa, params=dict()):
     params.setdefault('BlockWidthX', 10)
@@ -954,6 +1002,7 @@ def plot_mina_3D(mina, column_hue='tipomineral', params=dict()):
     params.setdefault('curvas', [])
     params.setdefault('elipses', [])
     params.setdefault('conos', [])
+    params.setdefault('rampas', [])
     params.setdefault('id_bloques', set())
     params.setdefault('mina_rellena', pd.DataFrame())
     params.setdefault('opacity_blocks', 1)
@@ -965,6 +1014,7 @@ def plot_mina_3D(mina, column_hue='tipomineral', params=dict()):
     curva = params['curvas']
     elipses = params['elipses']
     cono = params['conos']
+    rampas = params['rampas']
     id_bloques = params['id_bloques']
     mina_rellena = params['mina_rellena']
     opacity_blocks = params['opacity_blocks']
@@ -1044,7 +1094,7 @@ def plot_mina_3D(mina, column_hue='tipomineral', params=dict()):
         i = 1
         for a, b, h, alpha, x_centro, y_centro, z_sup in cono:
             Z = np.linspace(z_sup - h, z_sup, 50)
-            Theta, Z = np.meshgrid(Theta, Z)
+            Theta, Z = np.meshgrid(theta, Z)
             X_cono = ((a/h)*np.cos(Theta)*np.cos(alpha) - (b/h)*np.sin(Theta)*np.sin(alpha))*(h-z_sup+Z) + x_centro
             Y_cono = ((a/h)*np.cos(Theta)*np.sin(alpha) + (b/h)*np.sin(Theta)*np.cos(alpha))*(h-z_sup+Z) + y_centro
             
@@ -1092,6 +1142,44 @@ def plot_mina_3D(mina, column_hue='tipomineral', params=dict()):
             name='Puntos Iniciales',
             opacity=opacity_blocks**4
         ))
+
+    if len(rampas) > 0:
+        s_min = 0
+        s_max = 0
+        for i in range(len(rampas)):
+            minval = np.min(rampas[i][3]) 
+            maxval = np.max(rampas[i][3])
+            if minval < s_min:
+                s_min = minval
+            if maxval > s_max:
+                s_max = maxval
+        
+        cmap = cm.get_cmap('jet')
+        norm = mcolors.Normalize(vmin=s_min, vmax=s_max)
+
+        for i, (X_rampa, Y_rampa, Z_rampa, shift) in enumerate(rampas, 1):
+            if isinstance(shift, (int, float)):
+                s_val = shift
+            elif isinstance(shift, tuple) and len(shift) == 2:
+                if shift[0] < shift[1]:
+                    s_val = 0.25*shift[0] + 0.75*shift[1]
+                else:
+                    s_val = 0.75*shift[0] + 0.25*shift[1]
+            else:
+                raise ValueError(f'Formato inválido de rampas. Vea el valor s de rampa {i}.')
+            
+            rgba = cmap(norm(s_val))
+            color = 'rgb({}, {}, {})'.format(int(255*rgba[0]), int(255*rgba[1]), int(255*rgba[2]))
+
+            fig.add_trace(go.Scatter3d(
+                x=X_rampa,
+                y=Y_rampa,
+                z=Z_rampa,
+                mode='lines',
+                line=dict(color=color, width=5),
+                name=f'Rampa {i}'
+            ))
+        
     
     if len(id_bloques)>0:
         if not mina_rellena.empty:
