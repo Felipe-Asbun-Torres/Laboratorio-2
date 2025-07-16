@@ -450,9 +450,9 @@ def Rampa_Carril(cono, params_rampa, shift, z_min=None, n_por_vuelta=100, max_vu
         arco_seccion_loc = (len_seccion/perimeter)*2*np.pi
         arcsecc = np.min((arco_seccion, arco_seccion_loc))
 
-    print(arcsecc)
+    # print(arcsecc)
     N_shift = int(2*np.pi/(arcsecc)*max_vueltas)+1
-    print(N_shift)
+    # print(N_shift)
     len_shift = len(shift)
     if len_shift < N_shift:
         shift = ((N_shift//len_shift + 1)*tuple(shift))[:N_shift]
@@ -463,7 +463,7 @@ def Rampa_Carril(cono, params_rampa, shift, z_min=None, n_por_vuelta=100, max_vu
         orientacion = -1
 
     n_trozo = int((arcsecc/(2*np.pi))*n_por_vuelta)
-    print(n_trozo)
+    # print(n_trozo)
 
     i = 0
     for sh in shift:
@@ -625,6 +625,20 @@ def total_additional_blocks_numba(mina_rellena, rampa, params=dict()):
 
     return prec_ids, supp_ids
 
+
+def is_valid_shift(s):
+    return all(not (s[i] != 0 and np.abs(s[i]-s[i+1]) >= 2) for i in range(len(s)-1))
+
+
+def discrete_shift(raw_shift, s_min, s_max):
+    shift = []
+
+    shift_ref = np.array(range(s_min, s_max + 1))
+    for s in raw_shift:
+        idx_min = np.argmin(np.abs(shift_ref - s))
+        shift.append(int(shift_ref[idx_min]))
+
+    return shift
 
 ###############################################################
 ##################### Plotting Functions ######################
@@ -1041,9 +1055,9 @@ def plot_mina_3D(mina, column_hue='tipomineral', params=dict()):
                     color=mini_mina[column_hue],
                     colorscale='rainbow',
                     colorbar=dict(title=column_hue,
-                                x=1.15,
+                                x=-0.25,
                                 y=0.5,
-                                len=0.75),
+                                len=0.5),
                     opacity=opacity_blocks
                 ),
                 hovertemplate=(
@@ -1073,24 +1087,7 @@ def plot_mina_3D(mina, column_hue='tipomineral', params=dict()):
     colors = ['Viridis', 'Turbo', 'Hot', 'Ice', 'Plasma', 'Agsunset', 'Mint', 'Emrld']
     if len(cono)>0:
         cono_indices = []
-        # if isinstance(cono, tuple) and len(cono)==7:
-        #     a, b, h, x_centro, y_centro, alpha, z_sup = cono
-        #     Z = np.linspace(z_sup - h, z_sup, 50)
-        #     Theta, Z = np.meshgrid(Theta, Z)
-        #     X_cono = ((a/h)*np.cos(Theta)*np.cos(alpha) - (b/h)*np.sin(Theta)*np.sin(alpha))*(h-z_sup+Z) + x_centro
-        #     Y_cono = ((a/h)*np.cos(Theta)*np.sin(alpha) + (b/h)*np.sin(Theta)*np.cos(alpha))*(h-z_sup+Z) + y_centro
-            
-        #     fig.add_trace(go.Surface(
-        #         x=X_cono,
-        #         y=Y_cono,
-        #         z=Z,
-        #         colorscale='viridis',
-        #         name='Cono',
-        #         opacity=0.8,
-        #         showscale=False
-        #     ))
-        #     cono_indices.append((1, len(fig.data)-1))
-        # else:
+
         i = 1
         for a, b, h, alpha, x_centro, y_centro, z_sup in cono:
             Z = np.linspace(z_sup - h, z_sup, 50)
@@ -1154,15 +1151,44 @@ def plot_mina_3D(mina, column_hue='tipomineral', params=dict()):
             if maxval > s_max:
                 s_max = maxval
         
-        cmap = cm.get_cmap('jet')
+        colormap = 'jet'
+        cmap = cm.get_cmap(colormap)
         norm = mcolors.Normalize(vmin=s_min, vmax=s_max)
 
         for i, (X_rampa, Y_rampa, Z_rampa, shift) in enumerate(rampas, 1):
+            s_vals_for_legend = np.linspace(s_min, s_max, 100)
+            x_dummy = np.full_like(s_vals_for_legend, np.array(X_rampa).mean())
+            y_dummy = np.full_like(s_vals_for_legend, np.array(Y_rampa).mean())
+            z_dummy = np.full_like(s_vals_for_legend, np.array(Z_rampa).mean())
+
+            fig.add_trace(go.Scatter3d(
+                x=x_dummy,
+                y=y_dummy,
+                z=z_dummy,
+                mode='markers',
+                marker=dict(
+                    size=0.1,  # invisible
+                    color=s_vals_for_legend,
+                    colorscale=colormap,
+                    colorbar=dict(
+                        title="color shift",
+                        x=1.25,
+                        y=0.5,
+                        len=0.5
+                    ),
+                    showscale=True
+                ),
+                hoverinfo='skip',
+                name='Colorbar s',
+                showlegend=False
+            ))
+
+
             if isinstance(shift, (int, float)):
                 s_val = shift
-            elif isinstance(shift, tuple) and len(shift) == 2:
+            elif isinstance(shift, (tuple, list)) and len(shift) == 2:
                 if shift[0] < shift[1]:
-                    s_val = 0.25*shift[0] + 0.75*shift[1]
+                    s_val = 0.75*shift[0] + 0.25*shift[1]
                 else:
                     s_val = 0.75*shift[0] + 0.25*shift[1]
             else:
