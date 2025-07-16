@@ -5,6 +5,7 @@ import scipy as sp
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import matplotlib.colors as mcolors 
+import pyvista as pv
 
 import time
 import os
@@ -518,17 +519,21 @@ def Rampa_Carril(cono, params_rampa, shift, z_min=None, n_por_vuelta=100, max_vu
     return X_curve, Y_curve, Z_curve
 
 
-def isin_rampa(mina, mina_rellena, rampa, BlockHeightZ,
-            ancho_rampa, ord=np.inf):
+def isin_rampa(mina_rellena, rampa, BlockHeightZ,
+            ancho_rampa, ord=np.inf, filtrar_aire=True):
     X_curve, Y_curve, Z_curve = rampa
     Z_curve = np.array(Z_curve) + BlockHeightZ / 2
     alturas = np.array(sorted(mina_rellena['z'].unique()))
 
     radio = ancho_rampa / 2
-    filtro_aire = mina_rellena['tipomineral'].values != -1
+    if filtrar_aire:
+        filtro_aire = mina_rellena['tipomineral'].values != -1
+        mina_rellena_filtrada = mina_rellena[filtro_aire]
+    else:
+        mina_rellena_filtrada = mina_rellena
 
     id_bloques_in_rampa = set()
-    mina_rellena_filtrada = mina_rellena[filtro_aire]
+    
 
     # Preconstruir árboles por cada nivel Z
     trees_por_z = {}
@@ -1065,7 +1070,7 @@ def plot_mina_3D(mina, column_hue='tipomineral', params=dict()):
                 customdata=mina[['id', column_hue]],
                 name=f'Bloques'
             ))
-            
+
         else:
             fases_mina = sorted(mina['fase'].unique())
             for f in fases_mina:
@@ -1344,84 +1349,276 @@ def plot_mina_3D(mina, column_hue='tipomineral', params=dict()):
     fig.show()
 
 
-def plot_perfil_mina_rampa(mina, rampa=None, cono=None, eje='x', cmap='tab10'):
-    plt.figure(figsize=(12, 6))
+def plot_mina_3D_pyvista(mina, column_hue='tipomineral', params=dict()):
+    """
+    Visualiza en 3D la mina como un modelo de bloques (cubos) usando PyVista.
+    (Versión actualizada para renderizar cubos en lugar de puntos)
+    """
+    # --- 1. Configuración Inicial y Parámetros ---
+    params.setdefault('puntos', [])
+    params.setdefault('curvas', [])
+    params.setdefault('elipses', [])
+    params.setdefault('conos', [])
+    params.setdefault('rampas', [])
+    params.setdefault('id_bloques', set())
+    params.setdefault('mina_rellena', pd.DataFrame())
+    params.setdefault('opacity_blocks', 1.0)
+    params.setdefault('z_ratio', 1.0)
+    params.setdefault('width', 900)
+    params.setdefault('height', 800)
+    # Dimensiones de los bloques (largo_x, largo_y, largo_z)
+    params.setdefault('block_dims', (10, 15, 15))
 
-    if rampa is not None:
-        X_rampa, Y_rampa, Z_rampa = rampa
+    plotter = pv.Plotter(window_size=[params['width'], params['height']])
 
-    if eje == 'x':
-        eje_horizontal = mina['x']
-        label = 'X'
-        if rampa is not None:
-            eje_rampa = X_rampa
-    elif eje == 'y':
-        eje_horizontal = mina['y']
-        label = 'Y'
-        if rampa is not None:
-            eje_rampa = Y_rampa
-    else:
-        raise ValueError("El eje debe ser 'x' o 'y'")
+    # --- 2. Graficar los Bloques de la Mina como Cubos ---
+    if not mina.empty:
+        required_columns = ['x', 'y', 'z', 'fase', 'id', column_hue]
+        if not all(col in mina.columns for col in required_columns):
+            raise ValueError("Faltan columnas requeridas en el DataFrame 'mina'.")
 
-    # Paredes de la mina
-    fases = np.sort(mina['fase'].unique())
-    n_fases = len(fases)
+        # Crear un objeto PolyData con los centros de los bloques
+        points = mina[['x', 'y', 'z']].values
+        cloud = pv.PolyData(points)
 
-    cmap_obj = plt.get_cmap(cmap, n_fases)
+        # Añadir los datos escalares (ej. 'ley_cobre') a los puntos
+        cloud.point_data[column_hue] = mina[column_hue].values
 
-    fase_color = {f: cmap_obj(i) for i, f in enumerate(fases)}
-    z = mina['z'].to_numpy()
+        # Crear un único glifo de cubo con las dimensiones deseadas
+        block_dims = params['block_dims']
+        cube_glyph = pv.Cube(
+            x_length=block_dims[0],
+            y_length=block_dims[1],
+            z_length=block_dims[2]
+        )
 
-    for fase in fases:
-        mask = mina['fase']==fase
-        plt.scatter(eje_horizontal[mask],
-                    z[mask],
-                    c=[fase_color[fase]],
-                    s=20, alpha=0.3,
-                    label=f'Fase {fase}'
-                    )
-    
-    # plt.scatter(eje_horizontal, mina['z'], c='gray', alpha=0.3, s=3, label='Mina')
+        # Generar los glifos (cubos) en la posición de cada punto
+        # Usamos factor=1.0 para que todos los cubos tengan el mismo tamaño
+        glyphs = cloud.glyph(geom=cube_glyph, factor=1.0)
 
-    # Rampa
-    if rampa is not None:
-        plt.plot(eje_rampa, Z_rampa, c='red', lw=2, label='Rampa')
+        # Añadir los glifos al plotter, coloreados por el escalar
+        plotter.add_mesh(
+            glyphs,
+            scalars=column_hue,
+            cmap='rainbow',
+            scalar_bar_args={'title': column_hue},
+            opacity=params['opacity_blocks'],
+            label='Modelo de Bloques'
+        )
 
-    
+    # --- 3. Graficar Geometrías Adicionales (sin cambios) ---
+    theta = np.linspace(0, 2 * np.pi, 50)
 
-    if cono is not None:
-        a, b, h, alpha, x_centro, y_centro, z_sup = cono
-        Theta = np.linspace(0, 2 * np.pi, 200)
-        Z = np.linspace(z_sup - h, z_sup, 100)
-        Theta, Z = np.meshgrid(Theta, Z)
+    # Elipses
+    for i, elipse in enumerate(params['elipses'], 1):
+        a, b, x_c, alpha, y_c, z_c = elipse
+        X_elipse = a * np.cos(theta) * np.cos(alpha) - b * np.sin(theta) * np.sin(alpha) + x_c
+        Y_elipse = a * np.cos(theta) * np.sin(alpha) + b * np.sin(theta) * np.cos(alpha) + y_c
+        Z_elipse = np.full_like(theta, z_c)
+        elipse_points = np.column_stack((X_elipse, Y_elipse, Z_elipse))
+        spline = pv.Spline(elipse_points, 500)
+        plotter.add_mesh(spline, color='black', line_width=2, label=f'Elipse {i}')
 
-        X_cono = ((a / h) * np.cos(Theta) * np.cos(alpha) - (b / h) * np.sin(Theta) * np.sin(alpha)) * (h - z_sup + Z) + x_centro
-        Y_cono = ((a / h) * np.cos(Theta) * np.sin(alpha) + (b / h) * np.sin(Theta) * np.cos(alpha)) * (h - z_sup + Z) + y_centro
+    # Conos (y su widget de visibilidad)
+    if params['conos']:
+        colors = ['viridis', 'hot', 'ice', 'plasma', 'cividis']
+        for i, cono_params in enumerate(params['conos'], 1):
+            a, b, h, alpha, x_c, y_c, z_sup = cono_params
+            u = np.linspace(z_sup - h, z_sup, 20)
+            v = np.linspace(0, 2 * np.pi, 40)
+            U, V = np.meshgrid(u, v)
+            r_u = (h - z_sup + U) / h
+            x_local = a * r_u * np.cos(V)
+            y_local = b * r_u * np.sin(V)
+            X_cono = x_local * np.cos(alpha) - y_local * np.sin(alpha) + x_c
+            Y_cono = x_local * np.sin(alpha) + y_local * np.cos(alpha) + y_c
+            Z_cono = U
+            cono_mesh = pv.StructuredGrid(X_cono, Y_cono, Z_cono)
+            actor = plotter.add_mesh(cono_mesh, cmap=colors[(i-1) % len(colors)], opacity=0.8)
+            
+            def toggle_cone_visibility(state):
+                actor.SetVisibility(state)
+            
+            plotter.add_checkbox_button_widget(toggle_cone_visibility, value=True, position=(5, 5 + i * 30))
+            plotter.add_text(f'Cono {i}', position=(45, 12 + i * 30), font_size=8)
 
-        if eje == 'x':
-            contorno_izq = X_cono.min(axis=1)
-            contorno_der = X_cono.max(axis=1)
-        else:  # eje == 'y'
-            contorno_izq = Y_cono.min(axis=1)
-            contorno_der = Y_cono.max(axis=1)
+    # Curvas
+    colors = ['black', 'red', 'green', 'blue']
+    for i, curva in enumerate(params['curvas'], 1):
+        X_curve, Y_curve, Z_curve = curva
+        curve_points = np.column_stack((X_curve, Y_curve, Z_curve))
+        spline = pv.Spline(curve_points, 1000)
+        plotter.add_mesh(spline, color=colors[(i-1) % len(colors)], line_width=5, label=f'Rampa {i}')
+
+    # Puntos
+    if params['puntos']:
+        puntos_array = np.array(params['puntos'])
+        puntos_cloud = pv.PolyData(puntos_array)
+        plotter.add_mesh(puntos_cloud, color='red', point_size=10, render_points_as_spheres=True, label='Puntos Iniciales')
+
+    # Rampas con color variable
+    if params['rampas']:
+        s_min = min(np.min(r[3]) for r in params['rampas'])
+        s_max = max(np.max(r[3]) for r in params['rampas'])
+        cmap = cm.get_cmap('jet')
+        norm = mcolors.Normalize(vmin=s_min, vmax=s_max)
         
-        plt.plot(contorno_izq, Z[:, 0], c='orange', lw=1.5, ls='--', label='Cono (contorno)')
-        plt.plot(contorno_der, Z[:, 0], c='orange', lw=1.5, ls='--')
+        for i, (X_rampa, Y_rampa, Z_rampa, shift) in enumerate(params['rampas'], 1):
+            s_val = np.mean(shift) if isinstance(shift, (list, tuple)) else shift
+            color = cmap(norm(s_val))
+            rampa_points = np.column_stack((X_rampa, Y_rampa, Z_rampa))
+            spline = pv.Spline(rampa_points, 1000)
+            plotter.add_mesh(spline, color=color, line_width=5, label=f'Rampa coloreada {i}')
+        
+        plotter.add_scalar_bar(title="Color Shift (Rampas)", mapper=pv.LookupTable(cmap='jet', scalar_range=(s_min, s_max)))
+
+    # Bloques Destacados (también como cubos)
+    if params['id_bloques']:
+        source_df = params['mina_rellena'] if not params['mina_rellena'].empty else mina
+        bloques = source_df[source_df['id'].isin(params['id_bloques'])]
+        if not bloques.empty:
+            bloques_points = bloques[['x', 'y', 'z']].values
+            bloques_cloud = pv.PolyData(bloques_points)
+            
+            # Usamos el mismo glifo de cubo definido antes
+            destacados_glyphs = bloques_cloud.glyph(geom=cube_glyph, factor=1.0)
+            
+            plotter.add_mesh(
+                destacados_glyphs,
+                color='red',
+                label='Bloques Destacados',
+                opacity=params['opacity_blocks']**0.5
+            )
+
+    # --- 4. Configuración Final de la Escena ---
+    plotter.set_scale(zscale=params['z_ratio']) 
+    plotter.add_axes()
+    plotter.add_legend()
+    plotter.add_title(f'Modelo de Bloques 3D con Color según {column_hue}')
+    plotter.show()
 
 
-    plt.xlabel(f'Coordenada {label}')
-    plt.ylabel('Altura Z')
-    plt.title(f'Vista de perfil ({label}-Z)')
-    plt.legend()
-    plt.grid(True)
+def plot_perfil_mina(
+    mina,
+    eje='xy',
+    valor_corte=None,
+    phase_col='fase',
+    cmap='tab10',
+    BlockWidthX=10,
+    BlockWidthY=10,
+    BlockHeightZ=16,
+    alpha=1.0
+):
+    """
+    Grafica un corte 2D de la mina en el plano especificado, coloreando según fase.
+
+    Parámetros
+    ----------
+    mina : pd.DataFrame
+        DataFrame con columnas 'x', 'y', 'z' y la columna de fase.
+    eje : str
+        Plano de proyección: 'xy', 'xz' o 'yz'.
+    valor_corte : float o int, opcional
+        Valor en la dirección ortogonal al plano, para filtrar bloques.
+        Si es None, se grafica todo.
+    phase_col : str
+        Nombre de la columna que contiene la fase.
+    cmap : str
+        Nombre del colormap de matplotlib a usar.
+    BlockWidthX, BlockWidthY, BlockHeightZ : float
+        Dimensiones de los bloques.
+    alpha : float
+        Transparencia de los bloques.
+    """
+    assert eje in ['xy', 'xz', 'yz'], "El eje debe ser 'xy', 'xz' o 'yz'"
+
+    # Determinar dirección del corte
+    if eje == 'xy':
+        plano = ('x', 'y')
+        ortogonal = 'z'
+        tolerancia = BlockHeightZ / 2
+    elif eje == 'xz':
+        plano = ('x', 'z')
+        ortogonal = 'y'
+        tolerancia = BlockWidthY / 2
+    elif eje == 'yz':
+        plano = ('y', 'z')
+        ortogonal = 'x'
+        tolerancia = BlockWidthX / 2
+
+    # Aplicar corte si se especifica
+    if valor_corte is not None:
+        mina = mina[np.abs(mina[ortogonal] - valor_corte) <= tolerancia]
+
+    if mina.empty:
+        print(f"No hay bloques en el corte {ortogonal} = {valor_corte}")
+        return
+
+    # Colormap categórico
+    fases = np.sort(mina[phase_col].unique())
+    norm = mcolors.BoundaryNorm(fases - 0.5, len(fases), clip=True)
+    colormap = plt.colormaps[cmap]
+
+    # Generar colores distribuidos uniformemente
+    colors = [colormap(i / max(len(fases)-1, 1)) for i in range(len(fases))]
+
+    # Asignar colores a cada fase
+    fase_color = dict(zip(fases, colors))
+
+    # Graficar
+    fig, ax = plt.subplots(figsize=(10, 8), dpi=300)
+    ancho = {'x': BlockWidthX, 'y': BlockWidthY, 'z': BlockHeightZ}
+
+    x_centros = []
+    y_centros = []
+
+    for _, row in mina.iterrows():
+        x_c = row[plano[0]]
+        y_c = row[plano[1]]
+        w = ancho[plano[0]]
+        h = ancho[plano[1]]
+        color = fase_color[row[phase_col]]
+
+        # Centrado del bloque
+        x0 = x_c - w / 2
+        y0 = y_c - h / 2
+
+        x_centros.append(x_c)
+        y_centros.append(y_c)
+
+        rect = patches.Rectangle(
+            (x0, y0), w, h,
+            linewidth=0.5, edgecolor=None, facecolor=color, alpha=alpha
+        )
+        ax.add_patch(rect)
+
+    # Ajuste de límites
+    x_centros = np.array(x_centros)
+    y_centros = np.array(y_centros)
+    w = ancho[plano[0]] / 2
+    h = ancho[plano[1]] / 2
+    ax.set_xlim(x_centros.min() - w, x_centros.max() + w)
+    ax.set_ylim(y_centros.min() - h, y_centros.max() + h)
+
+    ax.set_aspect('equal')
+    ax.set_xlabel(plano[0])
+    ax.set_ylabel(plano[1])
+    ax.set_title(f"Corte {eje.upper()} a {ortogonal} = {valor_corte}" if valor_corte is not None else f"Vista completa {eje.upper()}")
+
+    # Leyenda
+    handles = [patches.Patch(color=fase_color[f], label=f'Fase {f}') for f in fases]
+    ax.legend(handles=handles, title='Fase', loc='best')
+
+    # plt.grid(True)
     plt.tight_layout()
     plt.show()
 
 
 def plot_perfil_superior(mina, mina_rellena, rampa,
-                         BlockWidthX=10, BlockWidthY=10, BlockHeightZ=16, ancho_rampa=30, block_size=5,
+                         BlockWidthX=10, BlockWidthY=10, BlockHeightZ=16, ancho_rampa=30, block_size=5, filtrar_aire=True,
                          all_precedences=set(), width=900, height=800):
-    id_in_rampa = isin_rampa(mina, mina_rellena, rampa, BlockHeightZ, ancho_rampa)
+    
+    id_in_rampa = isin_rampa(mina_rellena, rampa, BlockHeightZ, ancho_rampa, filtrar_aire=filtrar_aire)
 
 
     x_min = mina['x'].min() - BlockWidthX
@@ -1431,7 +1628,10 @@ def plot_perfil_superior(mina, mina_rellena, rampa,
 
     ids_mina = set(mina['id'])
 
-    mask = (~mina_rellena['id'].isin(ids_mina)) & (mina_rellena['x']<=x_max) & (mina_rellena['x']>=x_min) & (mina_rellena['y']>=y_min) & (mina_rellena['y']<=y_max) & (~mina_rellena['id'].isin(id_in_rampa)) & (mina_rellena['tipomineral']!=-1) & (~mina_rellena['id'].isin(all_precedences))
+    mask = (~mina_rellena['id'].isin(ids_mina)) & (mina_rellena['x']<=x_max) & (mina_rellena['x']>=x_min) & (mina_rellena['y']>=y_min) & (mina_rellena['y']<=y_max) & (~mina_rellena['id'].isin(id_in_rampa)) & (~mina_rellena['id'].isin(all_precedences)) & (mina_rellena['tipomineral']!=-1)
+    
+    # if filtrar_aire:
+    #     mask = mask & (mina_rellena['tipomineral'].values != -1)
 
     notmina = mina_rellena[mask]
     blocks_rampa = mina_rellena[mina_rellena['id'].isin(id_in_rampa)]
@@ -1447,7 +1647,8 @@ def plot_perfil_superior(mina, mina_rellena, rampa,
             size=block_size,
             color=notmina['z'],
             colorscale='jet'
-        )
+        ),
+        name='Bloques NotMina'
     ))
 
     fig.add_trace(go.Scatter3d(
@@ -1456,13 +1657,16 @@ def plot_perfil_superior(mina, mina_rellena, rampa,
         marker=dict(
             size=block_size,
             color='black'
-        )
+        ),
+        name='Rampa'
     ))
 
     fig.update_layout(
         width=width,
-        height=height
+        height=height,
+        title=f'Rampa a soporte de bloques',
     )
+    fig.show()
 
 
 ######################################################
