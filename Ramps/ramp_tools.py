@@ -1042,17 +1042,15 @@ def plot_mina_3D(mina, column_hue='tipomineral', params=dict()):
         if not all(col in mina.columns for col in required_columns):
             raise ValueError("Faltan columnas requeridas en el DataFrame 'mina'.")
         
-        fases_mina = sorted(mina['fase'].unique())
-        for f in fases_mina:
-            mini_mina = mina[mina['fase']==f]
+        if column_hue == 'fase':
             fig.add_trace(go.Scatter3d(
-                x=mini_mina['x'],
-                y=mini_mina['y'],
-                z=mini_mina['z'],
+                x=mina['x'],
+                y=mina['y'],
+                z=mina['z'],
                 mode='markers',
                 marker=dict(
                     size=5,
-                    color=mini_mina[column_hue],
+                    color=mina[column_hue],
                     colorscale='rainbow',
                     colorbar=dict(title=column_hue,
                                 x=-0.25,
@@ -1064,9 +1062,36 @@ def plot_mina_3D(mina, column_hue='tipomineral', params=dict()):
                     "ID: %{customdata[0]}<br>" +
                     f"{column_hue}:"+"%{marker.color:.3f}<br>"
                 ),
-                customdata=mini_mina[['id', column_hue]],
-                name=f'Bloques fase {f}'
+                customdata=mina[['id', column_hue]],
+                name=f'Bloques'
             ))
+            
+        else:
+            fases_mina = sorted(mina['fase'].unique())
+            for f in fases_mina:
+                mini_mina = mina[mina['fase']==f]
+                fig.add_trace(go.Scatter3d(
+                    x=mini_mina['x'],
+                    y=mini_mina['y'],
+                    z=mini_mina['z'],
+                    mode='markers',
+                    marker=dict(
+                        size=5,
+                        color=mini_mina[column_hue],
+                        colorscale='rainbow',
+                        colorbar=dict(title=column_hue,
+                                    x=-0.25,
+                                    y=0.5,
+                                    len=0.5),
+                        opacity=opacity_blocks
+                    ),
+                    hovertemplate=(
+                        "ID: %{customdata[0]}<br>" +
+                        f"{column_hue}:"+"%{marker.color:.3f}<br>"
+                    ),
+                    customdata=mini_mina[['id', column_hue]],
+                    name=f'Bloques fase {f}'
+                ))
 
     theta = np.linspace(0, 2*np.pi, 50)
     i = 1
