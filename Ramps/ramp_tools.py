@@ -227,7 +227,8 @@ def Best_Cone_by_Profit_diff_evol(mina, mina_rellena, max_global_angle=45, min_a
 ###############################################################
 
 def Rampa(cono, params_rampa, z_min=None, n_por_vuelta=300, max_vueltas=3, 
-          return_final_theta_z=False, shift=0, BlockWidthX=10, BlockWidthY=10, z_top=None
+          shift=0, BlockWidthX=10, BlockWidthY=10, z_top=None, return_final_theta_z=False,
+          polar_mode=False
           ):
     """
     Genera la trayectoria tridimensional (rampa helicoidal) dentro de un cono truncado.
@@ -282,6 +283,10 @@ def Rampa(cono, params_rampa, z_min=None, n_por_vuelta=300, max_vueltas=3,
 
     if z_min is not None:
         if z_min > z_c:
+            if polar_mode:
+                if return_final_theta_z:
+                    return [], [], theta_0, z_c
+                return [], []
             if return_final_theta_z:
                 return [], [], [], theta_0, z_c
             return [], [], []
@@ -293,6 +298,7 @@ def Rampa(cono, params_rampa, z_min=None, n_por_vuelta=300, max_vueltas=3,
     X_curve = []
     Y_curve = []
     Z_curve = []
+
 
     z = z_c
     theta = theta_0
@@ -321,6 +327,8 @@ def Rampa(cono, params_rampa, z_min=None, n_por_vuelta=300, max_vueltas=3,
     y = y_new + y_cone
 
     X_curve.append(x); Y_curve.append(y); Z_curve.append(z)
+    
+
 
     stop = False
     for t in T:
@@ -633,11 +641,12 @@ def precedences_supp(
 def pared_rampa_numba(
     x_rampa, y_rampa, z_rampa,
     mina_x, mina_y, mina_z, mina_id,
-    x_c, y_c,
+    x_c, y_c, z_c, a, b, h,
     ancho_rampa
 ):
     pared_ext = []
     pared_int = []
+    z_c = z_rampa[0]
 
     for i in range(len(x_rampa)):
         x_r = x_rampa[i]
@@ -649,33 +658,70 @@ def pared_rampa_numba(
         norm = np.sqrt(dx**2 + dy**2)
         if norm == 0:
             continue
+        
 
-        factor = 1 + ancho_rampa / (2 * norm)
-        vec_rampa_x = factor * dx
-        vec_rampa_y = factor * dy
-        new_point_x = vec_rampa_x + x_c
-        new_point_y = vec_rampa_y + y_c
+        a_loc = a*(1 - z_c/h + z_r/h)
+        b_loc = b*(1 - z_c/h + z_r/h)
 
-        reference_x = x_c - new_point_x
-        reference_y = y_c - new_point_y
+        factor_ext = 1 + ancho_rampa / (2 * norm)
 
+        vec_rampa_x_ext = factor_ext * dx
+        vec_rampa_y_ext = factor_ext * dy
+        new_point_x_ext = vec_rampa_x_ext + x_c
+        new_point_y_ext = vec_rampa_y_ext + y_c
+
+        reference_x_ext = x_c - new_point_x_ext
+        reference_y_ext = y_c - new_point_y_ext
+
+
+        factor_int = 1 - ancho_rampa / (2 * norm)
+        a_loc_int = a_loc*factor_ext
+        b_loc_int = b_loc*factor_ext
+        vec_rampa_x_int = factor_int * dx
+        vec_rampa_y_int = factor_int * dy
+        new_point_x_int = vec_rampa_x_int + x_c
+        new_point_y_int = vec_rampa_y_int + y_c
+
+        reference_x_int = x_c - new_point_x_int
+        reference_y_int = y_c - new_point_y_int
+
+        dist_to_center = np.sqrt( (reference_x_int)**2 + (reference_y_int)**2 )
+
+        max_ab = a_loc_int if a_loc_int > b_loc_int else b_loc_int
+        min_ab = a_loc_int if b_loc_int > a_loc_int else b_loc_int
+        ang_int = 0.75*np.arctan(min_ab/max_ab)
 
         for j in range(len(mina_z)):
             if mina_z[j] >= z_r:
-                dist = np.sqrt( (mina_x[j] - new_point_x)**2 + (mina_y[j] - new_point_y)**2 )
-                continue
-            dist = np.sqrt( (mina_x[j] - new_point_x)**2 + (mina_y[j] - new_point_y)**2 )
-            if dist > 2*ancho_rampa:
-                continue
+                to_center_x = mina_x[j] - x_c
+                to_center_y = mina_y[j] - y_c
+                
+                dot_to_center = to_center_x * (-reference_x_int) + to_center_y * (-reference_y_int)
+                if dot_to_center < 0:
+                    continue
 
-            dx_m = mina_x[j] - new_point_x
-            dy_m = mina_y[j] - new_point_y
-            dot = dx_m * reference_x + dy_m * reference_y
+                dist = np.sqrt( (mina_x[j] - new_point_x_int)**2 + (mina_y[j] - new_point_y_int)**2 )
 
-            if dot < 0:
-                pared_ext.append(mina_id[j]) 
-            if dot >= 0:
-                pared_int.append(mina_id[j])
+                dx_m = mina_x[j] - new_point_x_int
+                dy_m = mina_y[j] - new_point_y_int
+                dot = (dx_m * reference_x_int + dy_m * reference_y_int)/(dist_to_center*dist)
+
+                if dot > np.cos(ang_int):
+                    pared_int.append(mina_id[j])
+
+            else:
+                dist = np.sqrt( (mina_x[j] - new_point_x_ext)**2 + (mina_y[j] - new_point_y_ext)**2 )
+
+                if dist > 2*ancho_rampa:
+                    continue
+
+                dx_m = mina_x[j] - new_point_x_ext
+                dy_m = mina_y[j] - new_point_y_ext
+                dot = dx_m * reference_x_ext + dy_m * reference_y_ext
+
+                if dot < 0:
+                    pared_ext.append(mina_id[j]) 
+
 
     return pared_ext, pared_int
 
@@ -1503,7 +1549,7 @@ def plot_mina_3D_pyvista(mina, column_hue='tipomineral', params=dict()):
 
     # --- 2. Graficar los Bloques de la Mina como Cubos ---
     if not mina.empty:
-        required_columns = ['x', 'y', 'z', 'fase', 'id', column_hue]
+        required_columns = ['x', 'y', 'z', 'id', column_hue]
         if not all(col in mina.columns for col in required_columns):
             raise ValueError("Faltan columnas requeridas en el DataFrame 'mina'.")
 
