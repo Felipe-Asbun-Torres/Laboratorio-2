@@ -1,34 +1,20 @@
 import numpy as np
-import numpy.matlib as matlib
 import pandas as pd
 import scipy as sp
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-import matplotlib.colors as mcolors 
+import matplotlib.colors as mcolors
+import matplotlib.cm as cm_module
 import pyvista as pv
 
 import time
 import os
 import numba as nb
-import numbers
-
-from matplotlib.animation import FuncAnimation
-import matplotlib.cm as cm 
 
 import plotly.graph_objects as go
-
-from skopt.utils import use_named_args
-from skopt.space import Real, Integer, Categorical
-from skopt import gp_minimize
 from itertools import product
-from functools import partial
-
-from pathlib import Path
-from copy import deepcopy
-
 from scipy.spatial import cKDTree
-from multiprocessing import Pool, cpu_count
-from collections import defaultdict
+
 
 
 
@@ -88,23 +74,23 @@ def isin_cone(mina_rellena, params_cono, min_area=0):
     return points_in
 
 
-def Best_Cone_by_Volume(mina, max_global_angle=45):
+def Best_Cone_by_Volume(mina, max_global_angle=45, penalization=1e-2):
     x_c = mina['x'].mean()
     y_c = mina['y'].mean()
     z_c = mina['z'].max()
 
     points = np.array(mina[['x', 'y', 'z']])
 
-    a_guess = (2/3)*(mina['x'].max() - mina['x'].min())
-    b_guess = (2/3)*(mina['y'].max() - mina['y'].min())
-    h_guess = (4/3)*(mina['z'].max() - mina['z'].min())
+    a_guess = (1)*(mina['x'].max() - mina['x'].min())
+    b_guess = (1)*(mina['y'].max() - mina['y'].min())
+    h_guess = (2)*(mina['z'].max() - mina['z'].min())
     x_guess = mina['x'].median()
     y_guess = mina['y'].median()
     alpha_guess = 0
 
     def objective(params):
         a, b, h, alpha, x_cone, y_cone, z_cone = params
-        varepsilon = 1e-2
+        varepsilon = penalization
         if (a <= 0) or (b <= 0) or (h <= 0):
             return 1e20
         return (1/3)*np.pi*a*b*h + varepsilon*abs(x_cone-x_c)**2 + varepsilon*abs(y_cone-y_c)**2
@@ -169,6 +155,8 @@ def Best_Cone_by_Profit_diff_evol(mina, mina_rellena, max_global_angle=45, min_a
     recombination = options['recombination']
     x0 = options['x0']
 
+    if mina.empty:
+        mina = mina_rellena
     
     x_c = mina['x'].mean()
     y_c = mina['y'].mean()
@@ -191,17 +179,17 @@ def Best_Cone_by_Profit_diff_evol(mina, mina_rellena, max_global_angle=45, min_a
     y_low = (1-lambda_y)*mina['y'].min() + (lambda_y)*mina['y'].max()
     y_up = (lambda_y)*mina['y'].min() + (1-lambda_y)*mina['y'].max()
 
-    print(a_low, a_up)
-    print(b_low, b_up)
-    print(h_low, h_up)
-    print(x_low, x_up)
-    print(y_low, y_up)
+    print('a_limits:', a_low, a_up)
+    print('b_limits', b_low, b_up)
+    print('h_limits:', h_low, h_up)
+    print('x_limits:', x_low, x_up)
+    print('y_limits:', y_low, y_up)
 
-    a_guess = (0.75)*(mina['x'].max() - mina['x'].min())
-    b_guess = (0.75)*(mina['y'].max() - mina['y'].min())
+    a_guess = (1)*(mina['x'].max() - mina['x'].min())
+    b_guess = (1)*(mina['y'].max() - mina['y'].min())
     x_guess = mina['x'].median()
     y_guess = mina['y'].median()
-    h_guess = (1)*(mina['z'].max() - mina['z'].min())
+    h_guess = (2)*(mina['z'].max() - mina['z'].min())
     alpha_guess = 0
 
     if len(x0)==0:
@@ -209,14 +197,14 @@ def Best_Cone_by_Profit_diff_evol(mina, mina_rellena, max_global_angle=45, min_a
 
     def objective(params):
         a, b, h, alpha, x_cone, y_cone, z_cone = params
-        varepsilon = 1e-2
+        varepsilon = 0
         if np.arctan(h/a)*180/np.pi > max_global_angle:
             return 1e20
         if np.arctan(h/b)*180/np.pi > max_global_angle:
             return 1e20
         if (a <= 0) or (b <= 0) or (h <= 0):
             return 1e20
-        return -profit(mina_rellena, params, min_area=min_area) + varepsilon*abs(x_cone-x_c)**2 + varepsilon*abs(y_cone-y_c)**2
+        return -profit_cone(mina_rellena, params, min_area=min_area) + varepsilon*abs(x_cone-x_c)**2 + varepsilon*abs(y_cone-y_c)**2
     
     bounds = [(a_low, a_up),
               (b_low, b_up),
@@ -238,8 +226,9 @@ def Best_Cone_by_Profit_diff_evol(mina, mina_rellena, max_global_angle=45, min_a
 ########################### Rampas ############################
 ###############################################################
 
-def Rampa(cono, params_rampa, z_min=None, n_por_vuelta=100, max_vueltas=3, 
-          return_final_theta_z=False, shift=0, BlockWidthX=10, BlockWidthY=10, z_top=None, len_seccion=None):
+def Rampa(cono, params_rampa, z_min=None, n_por_vuelta=300, max_vueltas=3, 
+          return_final_theta_z=False, shift=0, BlockWidthX=10, BlockWidthY=10, z_top=None
+          ):
     """
     Genera la trayectoria tridimensional (rampa helicoidal) dentro de un cono truncado.
 
@@ -364,6 +353,8 @@ def Rampa(cono, params_rampa, z_min=None, n_por_vuelta=100, max_vueltas=3,
             x_new = x*(1+shift[i]*norm_ell/np.linalg.norm((x,y)))
             y_new = y*(1+shift[i]*norm_ell/np.linalg.norm((x,y)))
 
+            # print(np.linalg.norm(np.array( (x_new, y_new) ) - np.array( (x,y) )))
+
             x = x_new + x_cone
             y = y_new + y_cone
 
@@ -387,7 +378,7 @@ def Rampa(cono, params_rampa, z_min=None, n_por_vuelta=100, max_vueltas=3,
     return X_curve, Y_curve, Z_curve
 
 
-def Rampa_Carril(cono, params_rampa, shift, z_min=None, n_por_vuelta=100, max_vueltas=3, 
+def Rampa_Carril(cono, params_rampa, shift, min_area=None, alturas=None, n_por_vuelta=100, max_vueltas=3, 
                  return_final_theta_z=False, return_sep=False,
                  BlockWidthX=10, BlockWidthY=10, arco_seccion=np.pi/2, len_seccion=None
                  ):
@@ -454,9 +445,24 @@ def Rampa_Carril(cono, params_rampa, shift, z_min=None, n_por_vuelta=100, max_vu
     # print(arcsecc)
     N_shift = int(2*np.pi/(arcsecc)*max_vueltas)+1
     # print(N_shift)
+    if shift is None:
+        shift = [0]*N_shift
+    
+    if isinstance(shift, int):
+        shift = [shift]*N_shift
+
     len_shift = len(shift)
     if len_shift < N_shift:
         shift = ((N_shift//len_shift + 1)*tuple(shift))[:N_shift]
+    # print(N_shift)
+    # print(shift)
+
+
+    max_arc = 2*np.pi*max_vueltas
+    recorrido = 0
+
+    # if len_shift > N_shift:
+    # shift = shift[:N_shift]
 
     if orientacion >= 0:
         orientacion = 1
@@ -467,6 +473,7 @@ def Rampa_Carril(cono, params_rampa, shift, z_min=None, n_por_vuelta=100, max_vu
     # print(n_trozo)
 
     i = 0
+    previous_theta = 0
     for sh in shift:
         if i==0:
             z_f = z_c
@@ -479,15 +486,22 @@ def Rampa_Carril(cono, params_rampa, shift, z_min=None, n_por_vuelta=100, max_vu
         arco_seccion_loc = (len_seccion/perimeter)*2*np.pi
         arcsecc = np.min((arco_seccion, arco_seccion_loc))
 
+        if min_area is not None:
+            z_min = None
+            if alturas is not None:
+                z_min = Z_min(alturas, cono, min_area, sh, BlockWidthX, BlockWidthY)
+        else:
+            z_min = None
+
         if i==0:
-            x_rampa, y_rampa, z_rampa, theta_f, z_f = Rampa(cono, params_rampa, 
-                                                       z_min=z_min, n_por_vuelta=n_trozo, max_vueltas=arcsecc/(2*np.pi),
-                                                       return_final_theta_z=True, shift=sh,
-                                                       BlockWidthX=BlockWidthX, BlockWidthY=BlockWidthY, len_seccion=len_seccion)
+            x_rampa, y_rampa, z_rampa, theta_f, z_f = Rampa(cono, params_rampa, z_min, n_trozo, arcsecc/(2*np.pi), True, sh, BlockWidthX, BlockWidthY, z_top=None)
             
             X_curve += x_rampa; Y_curve += y_rampa; Z_curve += z_rampa
             rampas.append([x_rampa, y_rampa, z_rampa, sh])
             previous_shift = sh
+            recorrido += np.abs(theta_f)
+
+            previous_theta = theta_f
 
         else:
             if previous_shift != sh:
@@ -495,19 +509,23 @@ def Rampa_Carril(cono, params_rampa, shift, z_min=None, n_por_vuelta=100, max_vu
             else:
                 s = sh
 
-            x_rampa, y_rampa, z_rampa, theta_f, z_f = Rampa(cono, (theta_f, descenso, orientacion), 
-                                                    z_min=z_min, n_por_vuelta=n_trozo, max_vueltas=arcsecc/(2*np.pi),
-                                                    return_final_theta_z=True, shift=s,
-                                                    BlockWidthX=BlockWidthX, BlockWidthY=BlockWidthY,
-                                                    z_top=z_f)
+            x_rampa, y_rampa, z_rampa, theta_f, z_f = Rampa(cono, (theta_f, descenso, orientacion), z_min, n_trozo, arcsecc/(2*np.pi), True, s, BlockWidthX, BlockWidthY, z_top=z_f)
             
             X_curve += x_rampa; Y_curve += y_rampa; Z_curve += z_rampa
             rampas.append([x_rampa, y_rampa, z_rampa, s])
             previous_shift = sh
+
+            recorrido += np.abs(theta_f - previous_theta)
+            previous_theta = theta_f
         
         if (z_min is not None) and (len(z_rampa)>0):
             if z_min > z_rampa[-1]:
                 break
+
+        print(np.rad2deg(recorrido))
+
+        if recorrido >= max_arc:
+            break
         i+=1
 
     if return_sep:
@@ -565,8 +583,10 @@ def precedences_supp(
         inv_bw_x, inv_bw_y, inv_bh_z,
         tan_angle_up, tan_angle_down, h_up, h_down):
 
-    n_blocks   = x_all.size
-    is_precise = np.zeros(n_blocks, dtype=np.bool_)
+    z_r_shifted = z_r + (1.0)/(2*inv_bh_z)
+
+    n_blocks = x_all.size
+    is_prec = np.zeros(n_blocks, dtype=np.bool_)
     is_supp = np.zeros(n_blocks, dtype=np.bool_)
 
     not_aire = tipomineral != -1
@@ -576,15 +596,88 @@ def precedences_supp(
         dy = np.abs(y_all - y_r[j]) * inv_bw_y
         dist = np.maximum(dx, dy)
 
-        arriba = (z_all >= z_r[j]) & not_aire
-        z_rel  = ((z_all - (z_r[j] - h_up)) * inv_bh_z) * tan_angle_up
+        arriba = (z_all >= z_r_shifted[j]) & not_aire
+        z_rel  = ((z_all - (z_r_shifted[j] - h_up)) * inv_bh_z) * tan_angle_up
 
-        abajo = (z_all < z_r[j]) & not_aire
-        z_rel_down = (((z_r[j] + h_down) - z_all) * inv_bh_z) * tan_angle_down
+        abajo = (z_all < z_r_shifted[j]) & not_aire
+        z_rel_down = (((z_r_shifted[j] + h_down) - z_all) * inv_bh_z) * tan_angle_down
 
-        is_precise |= arriba & (dist <= z_rel)
+        is_prec |= arriba & (dist <= z_rel)
         is_supp |= abajo & (dist <= z_rel_down)
-    return ids[is_precise], ids[is_supp]
+    return ids[is_prec], ids[is_supp]
+
+
+# def pared_rampa(rampa, mina_rellena, x_c, y_c, ancho_rampa, BlockHeightZ):
+#     alturas = mina_rellena['z'].unique()
+#     pared = set()
+#     x_rampa, y_rampa, z_rampa = rampa
+    
+#     for i in range(len(x_rampa)):
+#         x_r = x_rampa[i]; y_r = y_rampa[i]; z_r = z_rampa[i]
+#         vec_rampa = np.array( (x_c - x_r, y_c - y_r) )
+#         vec_rampa = (1 + ancho_rampa/(2*np.linalg.norm(vec_rampa)))*vec_rampa
+
+#         new_point_rampa = np.array([x_c,y_c]) - vec_rampa
+
+#         z_cercano = alturas[np.abs(alturas - z_r).argmin()]
+#         z_to_check = alturas[alturas<=z_cercano]
+
+#         mina_z = mina_rellena[mina_rellena['z'].isin(z_to_check)]
+#         dot_product_filter = ((mina_z[['x','y']] - new_point_rampa)@vec_rampa < 0)
+#         id_pared = set(mina_z[dot_product_filter]['id'])
+#         pared |= id_pared
+    
+#     return pared
+
+@nb.njit(cache=True, fastmath=True)
+def pared_rampa_numba(
+    x_rampa, y_rampa, z_rampa,
+    mina_x, mina_y, mina_z, mina_id,
+    x_c, y_c,
+    ancho_rampa
+):
+    pared_ext = []
+    pared_int = []
+
+    for i in range(len(x_rampa)):
+        x_r = x_rampa[i]
+        y_r = y_rampa[i]
+        z_r = z_rampa[i]
+
+        dx = x_r - x_c
+        dy = y_r - y_c
+        norm = np.sqrt(dx**2 + dy**2)
+        if norm == 0:
+            continue
+
+        factor = 1 + ancho_rampa / (2 * norm)
+        vec_rampa_x = factor * dx
+        vec_rampa_y = factor * dy
+        new_point_x = vec_rampa_x + x_c
+        new_point_y = vec_rampa_y + y_c
+
+        reference_x = x_c - new_point_x
+        reference_y = y_c - new_point_y
+
+
+        for j in range(len(mina_z)):
+            if mina_z[j] >= z_r:
+                dist = np.sqrt( (mina_x[j] - new_point_x)**2 + (mina_y[j] - new_point_y)**2 )
+                continue
+            dist = np.sqrt( (mina_x[j] - new_point_x)**2 + (mina_y[j] - new_point_y)**2 )
+            if dist > 2*ancho_rampa:
+                continue
+
+            dx_m = mina_x[j] - new_point_x
+            dy_m = mina_y[j] - new_point_y
+            dot = dx_m * reference_x + dy_m * reference_y
+
+            if dot < 0:
+                pared_ext.append(mina_id[j]) 
+            if dot >= 0:
+                pared_int.append(mina_id[j])
+
+    return pared_ext, pared_int
 
 
 def total_additional_blocks_numba(mina_rellena, rampa, params=dict()):
@@ -634,16 +727,48 @@ def total_additional_blocks_numba(mina_rellena, rampa, params=dict()):
 def is_valid_shift(s):
     return all(not (s[i] != 0 and np.abs(s[i]-s[i+1]) >= 2) for i in range(len(s)-1))
 
+def valid_shift(s):
+    if all(not (s[i] != 0 and np.abs(s[i]-s[i+1]) >= 2) for i in range(len(s)-1)):
+        new_shift = s
+        
+    else:
+        new_shift = []
+        for i in range(len(s)-1):
+            actual = s[i]
+            next = s[i+1]
+            new_shift.append(actual)
+
+            diff = np.abs(actual - next)
+            if diff >= 2:
+                if next > actual:
+                    to_insert = list(range(actual + 1, next, 1))
+                else:
+                    to_insert = list(range(actual - 1, next, -1))
+                for ins in to_insert:
+                    new_shift.append(ins)
+        
+        new_shift.append(s[-1])
+
+    return new_shift
+
 
 def discrete_shift(raw_shift, s_min, s_max):
+    # Se asume que s_min, s_max son enteros
     shift = []
+    n = np.abs(s_min) + np.abs(s_max) + 1
+    interval_check = np.linspace(s_min, s_max, n+1)
+    shift_ref = np.array(range(s_min, s_max+1))
 
-    shift_ref = np.array(range(s_min, s_max + 1))
     for s in raw_shift:
-        idx_min = np.argmin(np.abs(shift_ref - s))
-        shift.append(int(shift_ref[idx_min]))
+        idx = np.argmax((interval_check - s)>=0)
+        if idx == 0:
+            shift.append(s_min)
+            continue
+        shift.append(int(shift_ref[idx-1]))
 
     return shift
+
+
 
 ###############################################################
 ##################### Plotting Functions ######################
@@ -1017,24 +1142,29 @@ def plot_mina_3D(mina, column_hue='tipomineral', params=dict()):
     """
     fig = go.Figure()
 
+    params.setdefault('marker_size', 5)
     params.setdefault('puntos', [])
     params.setdefault('curvas', [])
     params.setdefault('elipses', [])
     params.setdefault('conos', [])
     params.setdefault('rampas', [])
     params.setdefault('id_bloques', set())
+    params.setdefault('id_bloques_size', 3)
     params.setdefault('mina_rellena', pd.DataFrame())
     params.setdefault('opacity_blocks', 1)
     params.setdefault('z_ratio', 1)
     params.setdefault('width', 900)
     params.setdefault('height', 800)
 
+
+    marker_size = params['marker_size']
     puntos = params['puntos']
     curva = params['curvas']
     elipses = params['elipses']
     cono = params['conos']
     rampas = params['rampas']
     id_bloques = params['id_bloques']
+    id_bloques_size = params['id_bloques_size']
     mina_rellena = params['mina_rellena']
     opacity_blocks = params['opacity_blocks']
     z_ratio = params['z_ratio']
@@ -1043,60 +1173,60 @@ def plot_mina_3D(mina, column_hue='tipomineral', params=dict()):
 
 
     if not mina.empty:
-        required_columns = ['x', 'y', 'z', 'fase', 'id', column_hue]
+        required_columns = ['x', 'y', 'z', 'id', column_hue]
         if not all(col in mina.columns for col in required_columns):
             raise ValueError("Faltan columnas requeridas en el DataFrame 'mina'.")
         
-        if column_hue == 'fase':
-            fig.add_trace(go.Scatter3d(
-                x=mina['x'],
-                y=mina['y'],
-                z=mina['z'],
-                mode='markers',
-                marker=dict(
-                    size=5,
-                    color=mina[column_hue],
-                    colorscale='rainbow',
-                    colorbar=dict(title=column_hue,
-                                x=-0.25,
-                                y=0.5,
-                                len=0.5),
-                    opacity=opacity_blocks
-                ),
-                hovertemplate=(
-                    "ID: %{customdata[0]}<br>" +
-                    f"{column_hue}:"+"%{marker.color:.3f}<br>"
-                ),
-                customdata=mina[['id', column_hue]],
-                name=f'Bloques'
-            ))
+        # if column_hue == 'fase':
+        fig.add_trace(go.Scatter3d(
+            x=mina['x'],
+            y=mina['y'],
+            z=mina['z'],
+            mode='markers',
+            marker=dict(
+                size=marker_size,
+                color=mina[column_hue],
+                colorscale='rainbow',
+                colorbar=dict(title=column_hue,
+                            x=-0.25,
+                            y=0.5,
+                            len=0.5),
+                opacity=opacity_blocks
+            ),
+            hovertemplate=(
+                "ID: %{customdata[0]}<br>" +
+                f"{column_hue}:"+"%{marker.color:.3f}<br>" + "x: %{customdata[2]}<br>" "y: %{customdata[3]}<br>" + "z: %{customdata[4]}<br>"
+            ),
+            customdata=mina[['id', column_hue, 'x','y','z']],
+            name=f'Bloques'
+        ))
 
-        else:
-            fases_mina = sorted(mina['fase'].unique())
-            for f in fases_mina:
-                mini_mina = mina[mina['fase']==f]
-                fig.add_trace(go.Scatter3d(
-                    x=mini_mina['x'],
-                    y=mini_mina['y'],
-                    z=mini_mina['z'],
-                    mode='markers',
-                    marker=dict(
-                        size=5,
-                        color=mini_mina[column_hue],
-                        colorscale='rainbow',
-                        colorbar=dict(title=column_hue,
-                                    x=-0.25,
-                                    y=0.5,
-                                    len=0.5),
-                        opacity=opacity_blocks
-                    ),
-                    hovertemplate=(
-                        "ID: %{customdata[0]}<br>" +
-                        f"{column_hue}:"+"%{marker.color:.3f}<br>"
-                    ),
-                    customdata=mini_mina[['id', column_hue]],
-                    name=f'Bloques fase {f}'
-                ))
+        # else:
+        #     fases_mina = sorted(mina['fase'].unique())
+        #     for f in fases_mina:
+        #         mini_mina = mina[mina['fase']==f]
+        #         fig.add_trace(go.Scatter3d(
+        #             x=mini_mina['x'],
+        #             y=mini_mina['y'],
+        #             z=mini_mina['z'],
+        #             mode='markers',
+        #             marker=dict(
+        #                 size=marker_size,
+        #                 color=mini_mina[column_hue],
+        #                 colorscale='rainbow',
+        #                 colorbar=dict(title=column_hue,
+        #                             x=-0.25,
+        #                             y=0.5,
+        #                             len=0.5),
+        #                 opacity=opacity_blocks
+        #             ),
+        #             hovertemplate=(
+        #                 "ID: %{customdata[0]}<br>" +
+        #                 f"{column_hue}:"+"%{marker.color:.3f}<br>" + "x: %{customdata[2]}<br>" "y: %{customdata[3]}<br>" + "z: %{customdata[4]}<br>"
+        #             ),
+        #             customdata=mina[['id', column_hue, 'x','y','z']],
+        #             name=f'Bloques fase {f}'
+        #         ))
 
     theta = np.linspace(0, 2*np.pi, 50)
     i = 1
@@ -1182,7 +1312,7 @@ def plot_mina_3D(mina, column_hue='tipomineral', params=dict()):
                 s_max = maxval
         
         colormap = 'jet'
-        cmap = cm.get_cmap(colormap)
+        cmap = cm_module.get_cmap(colormap)
         norm = mcolors.Normalize(vmin=s_min, vmax=s_max)
 
         for i, (X_rampa, Y_rampa, Z_rampa, shift) in enumerate(rampas, 1):
@@ -1246,13 +1376,13 @@ def plot_mina_3D(mina, column_hue='tipomineral', params=dict()):
             fig.add_trace(go.Scatter3d(
                 x=X, y=Y, z=Z,
                 mode='markers',
-                marker=dict(color='red', size=1),
+                marker=dict(color='red', size=id_bloques_size),
                 name='Bloques destacados',
                 opacity=opacity_blocks**(1/2),
                 hovertemplate=(
-                "ID: %{customdata[0]}<br>"
+                "ID: %{customdata[0]}<br>" + "x: %{customdata[1]}<br>" + "y: %{customdata[2]}<br>" + "z: %{customdata[3]}<br>"
             ),
-            customdata=bloques['id'],
+            customdata=bloques[['id', 'x','y','z']],
             ))
         else:
             bloques = mina[mina['id'].isin(id_bloques)]
@@ -1263,7 +1393,7 @@ def plot_mina_3D(mina, column_hue='tipomineral', params=dict()):
                 fig.add_trace(go.Scatter3d(
                     x=X, y=Y, z=Z,
                     mode='markers',
-                    marker=dict(color='red', size=1),
+                    marker=dict(color='red', size=id_bloques_size),
                     name='Bloques destacados',
                     opacity=opacity_blocks**(1/2)
                 ))
@@ -1394,7 +1524,7 @@ def plot_mina_3D_pyvista(mina, column_hue='tipomineral', params=dict()):
 
         # Generar los glifos (cubos) en la posición de cada punto
         # Usamos factor=1.0 para que todos los cubos tengan el mismo tamaño
-        glyphs = cloud.glyph(geom=cube_glyph, factor=1.0)
+        glyphs = cloud.glyph(geom=cube_glyph, factor=1.0, scale=False)
 
         # Añadir los glifos al plotter, coloreados por el escalar
         plotter.add_mesh(
@@ -1460,7 +1590,7 @@ def plot_mina_3D_pyvista(mina, column_hue='tipomineral', params=dict()):
     if params['rampas']:
         s_min = min(np.min(r[3]) for r in params['rampas'])
         s_max = max(np.max(r[3]) for r in params['rampas'])
-        cmap = cm.get_cmap('jet')
+        cmap = cm_module.get_cmap('jet')
         norm = mcolors.Normalize(vmin=s_min, vmax=s_max)
         
         for i, (X_rampa, Y_rampa, Z_rampa, shift) in enumerate(params['rampas'], 1):
@@ -1507,7 +1637,9 @@ def plot_perfil_mina(
     BlockWidthX=10,
     BlockWidthY=10,
     BlockHeightZ=16,
-    alpha=1.0
+    alpha=1.0,
+    z_mode=False,
+    rampa=None, rampa_color='red', rampa_lw=2
 ):
     """
     Grafica un corte 2D de la mina en el plano especificado, coloreando según fase.
@@ -1546,16 +1678,25 @@ def plot_perfil_mina(
         ortogonal = 'x'
         tolerancia = BlockWidthX / 2
 
-    # Aplicar corte si se especifica
-    if valor_corte is not None:
-        mina = mina[np.abs(mina[ortogonal] - valor_corte) <= tolerancia]
+    # Aplicar corte si no se especifica
+    if valor_corte is None:
+        valor_corte = mina[ortogonal].median()
+    mina_plot = mina[np.abs(mina[ortogonal] - valor_corte) <= tolerancia]
 
-    if mina.empty:
+    if eje == 'xy' and z_mode:
+        mina_plot = mina
+
+    # if valor_corte is not None:
+    #     mina = mina[np.abs(mina[ortogonal] - valor_corte) <= tolerancia]
+    # else:
+    #     valor_corte
+
+    if mina_plot.empty:
         print(f"No hay bloques en el corte {ortogonal} = {valor_corte}")
         return
 
     # Colormap categórico
-    fases = np.sort(mina[phase_col].unique())
+    fases = np.sort(mina_plot[phase_col].unique())
     norm = mcolors.BoundaryNorm(fases - 0.5, len(fases), clip=True)
     colormap = plt.colormaps[cmap]
 
@@ -1572,7 +1713,7 @@ def plot_perfil_mina(
     x_centros = []
     y_centros = []
 
-    for _, row in mina.iterrows():
+    for _, row in mina_plot.iterrows():
         x_c = row[plano[0]]
         y_c = row[plano[1]]
         w = ancho[plano[0]]
@@ -1597,8 +1738,9 @@ def plot_perfil_mina(
     y_centros = np.array(y_centros)
     w = ancho[plano[0]] / 2
     h = ancho[plano[1]] / 2
-    ax.set_xlim(x_centros.min() - w, x_centros.max() + w)
-    ax.set_ylim(y_centros.min() - h, y_centros.max() + h)
+
+    xlim_inf = x_centros.min() - w; x_lim_sup = x_centros.max() + w
+    ylim_inf = y_centros.min() - h; y_lim_sup = y_centros.max() + h
 
     ax.set_aspect('equal')
     ax.set_xlabel(plano[0])
@@ -1610,6 +1752,31 @@ def plot_perfil_mina(
     ax.legend(handles=handles, title='Fase', loc='best')
 
     # plt.grid(True)
+
+    # Dibujar rampa si se provee
+    if rampa is not None:
+        x_r, y_r, z_r = rampa
+        x_r = np.array(x_r); y_r = np.array(y_r); z_r = np.array(z_r)
+
+        # Según el plano elegido
+        if eje == 'xy':
+            coord1, coord2 = x_r, y_r
+        elif eje == 'xz':
+            coord1, coord2 = x_r, z_r
+        elif eje == 'yz':
+            coord1, coord2 = y_r, z_r
+
+        ax.plot(
+            np.array(coord1),
+            np.array(coord2),
+            color=rampa_color, lw=rampa_lw, label='Rampa'
+        )
+        x_lim_inf = np.min( (xlim_inf, coord1.min() - w) ); x_lim_sup = np.max( (x_lim_sup, coord1.max() + w) )
+        y_lim_inf = np.min( (ylim_inf, coord2.min() - h) ); y_lim_sup = np.max( (y_lim_sup, coord2.max() + h) )
+    
+    ax.set_xlim(x_lim_inf, x_lim_sup)
+    ax.set_ylim(y_lim_inf, y_lim_sup)
+
     plt.tight_layout()
     plt.show()
 
@@ -1620,11 +1787,14 @@ def plot_perfil_superior(mina, mina_rellena, rampa,
     
     id_in_rampa = isin_rampa(mina_rellena, rampa, BlockHeightZ, ancho_rampa, filtrar_aire=filtrar_aire)
 
+    x_r, y_r, z_r = rampa
+    x_r = np.array(x_r)
+    y_r = np.array(y_r)
 
-    x_min = mina['x'].min() - BlockWidthX
-    x_max = mina['x'].max() + BlockWidthX
-    y_min = mina['y'].min() - BlockWidthY
-    y_max = mina['y'].max() + BlockWidthY
+    x_min = np.min((mina['x'].min(), x_r.min())) - BlockWidthX
+    x_max = np.max((mina['x'].max(), x_r.max())) + BlockWidthX
+    y_min = np.min((mina['y'].min(), y_r.min())) - BlockWidthY
+    y_max = np.max((mina['y'].max(), y_r.max())) + BlockWidthY
 
     ids_mina = set(mina['id'])
 
@@ -1895,7 +2065,9 @@ def Coefficient_Variation(FaseBanco):
 ####################### Extra Functions #######################
 ###############################################################
 
-def Z_min(mina, cono, min_area=1e6, debug=False):
+def Z_min(alturas, cono, min_area=1e6,
+          shift=0, BlockWidthX=10, BlockWidthY=10, 
+          debug=False):
     """
     Calcula el nivel mínimo `z` a partir del cual la proyección del cono supera un área mínima.
 
@@ -1927,16 +2099,25 @@ def Z_min(mina, cono, min_area=1e6, debug=False):
         El valor mínimo de `z` donde la sección horizontal del cono alcanza al menos `min_area`.
     """
     a, b, h, alpha, x_c, y_c, z_c = cono
-    Z_values = sorted(mina['z'].unique())
+    # Z_values = sorted(mina['z'].unique())
+    alturas = sorted(alturas)
+    mx = np.abs(BlockWidthX*np.cos(alpha))
+    my = np.abs(BlockWidthY*np.sin(alpha))
 
     z_min = z_c
-    for z in Z_values:
+    for z in alturas:
         z_rel = (h-z_c+z)/h
-        A = a*z_rel
-        B = b*z_rel
+        A = a*z_rel + shift*mx
+        B = b*z_rel + shift*my
+
         if debug:
             print((z, np.pi*A*B))
-        if np.pi*A*B >= min_area:
+
+        val = np.pi*A*B
+        if A < 0 or B < 0:
+            val = 0
+
+        if val >= min_area:
             z_min = z
             break
 
@@ -2027,9 +2208,12 @@ def relleno_mina(mina, default_density,
                  BlockWidthX, BlockWidthY, BlockHeightZ,
                  cm, cr, cp, P, FTL, R, ley_corte,
                  relleno_lateral=100):
-    
+    value_mode = True
+    if 'value' in mina.columns:
+        value_mode = False
+
     mina_copy = mina.copy()
-    mina_copy['value'] = 0 
+    # mina_copy['value'] = 0 
 
     x_min, x_max = mina['x'].min(), mina['x'].max()
     y_min, y_max = mina['y'].min(), mina['y'].max()
@@ -2089,10 +2273,15 @@ def relleno_mina(mina, default_density,
 
     Block_Vol = BlockWidthX * BlockWidthY * BlockHeightZ
 
-    mina_rellena['value'] = np.where(
-        mina_rellena['cut']<ley_corte, 
-        -cm*mina_rellena['density']*Block_Vol, 
-        (P-cr)*FTL*R*(mina_rellena['cut']/100.0)*(mina_rellena['density'])*Block_Vol - (cp+cm)*mina_rellena['density']*Block_Vol)
+
+    if value_mode:
+        mina_rellena['value'] = np.where(
+            mina_rellena['cut']<ley_corte, 
+            -cm*mina_rellena['density']*Block_Vol, 
+            (P-cr)*FTL*R*(mina_rellena['cut']/100.0)*(mina_rellena['density'])*Block_Vol - (cp+cm)*mina_rellena['density']*Block_Vol)
+    else:
+        mina_rellena.loc[mascara_solo_new_mina, 'value'] = 0
+
 
     return mina_rellena
 
@@ -2164,7 +2353,7 @@ def relleno_mina_angular(mina, default_density,
     return mina_rellena
 
 
-def profit(mina_rellena, params_cono, min_area=0):
+def profit_cone(mina_rellena, params_cono, min_area=0):
     in_cone = isin_cone(mina_rellena, params_cono, min_area=min_area)
     if in_cone.empty:
         return 0
@@ -2172,6 +2361,7 @@ def profit(mina_rellena, params_cono, min_area=0):
     points_in_cone = mina_rellena[in_cone]
 
     return points_in_cone['value'].sum()
+
 
 
 def Longitud_Rampa(rampa):
@@ -2188,4 +2378,96 @@ def Longitud_Rampa(rampa):
     length = np.sum(np.sqrt(dX**2 + dY**2 + dZ**2))
 
     return length
+
+
+def boundary(mina, BlockWidthX=10, BlockWidthY=10, BlockHeightZ=16, mode=True):
+    coords_values = set(map(tuple, mina[['x','y','z']].values))
+
+    if mode:
+        directions = [
+            (BlockWidthX, 0, 0), (-BlockWidthX, 0, 0),
+            (0, BlockWidthY, 0), (0, -BlockWidthY, 0),
+            (0, 0, -BlockHeightZ)
+        ]
+    else:
+        directions = [
+            (BlockWidthX, 0, 0), (-BlockWidthX, 0, 0),
+            (0, BlockWidthY, 0), (0, -BlockWidthY, 0)
+        ]
+
+    boundary = []
+    for bloque in mina.itertuples(index=False):
+        for dx, dy, dz in directions:
+            neighbor = (bloque.x + dx, bloque.y + dy, bloque.z + dz)
+            if neighbor not in coords_values:
+                boundary.append(bloque.id)
+                break
+
+    return boundary
+
+
+def global_angle(mina, cono, BlockWidthX=10, BlockWidthY=10, BlockHeightZ=16):
+    mina = mina.copy()
+    mina['x'] = mina['x']/BlockWidthX
+    mina['y'] = mina['y']/BlockWidthY
+    mina['z'] = mina['z']/BlockHeightZ
+
+    a, b, h, alpha_cone, x_cone, y_cone, z_c = cono
+
+    # Centro de la mina
+    x_cone = x_cone/BlockWidthX
+    y_cone = y_cone/BlockWidthY
+
+
+    min_z = mina['z'].unique().min()
+
+    last_fb = mina[mina['z']==min_z]
+
+    # Borde de la fase banco más baja
+    boundary_last_fb = boundary(last_fb, BlockWidthX=1, BlockWidthY=1, BlockHeightZ=1, mode=False)
+
+    max_angle = 0
+
+
+    for id_bloque in boundary_last_fb:
+        bloque = mina[mina['id']==id_bloque]
+
+        x_bloque = bloque['x'].values[0]
+        y_bloque = bloque['y'].values[0]
+        z_bloque = min_z
+
+        # Calculamos el plano vertical que pasa por el centro de la mina y por cada bloque del borde de la fase banco más baja
+        A = -(y_bloque - y_cone)
+        B = (x_bloque - x_cone)
+        D = -A*x_cone - B*y_cone
+
+        dist_to_plane = np.abs(A*mina['x'] + B*mina['y'] + D)/np.sqrt(mina['x']**2 + mina['y']**2)
+
+        # De los bloques más cercanos al plano, nos quedamos con aquellos de mayor altura
+        precandidates = mina[dist_to_plane <= 1]
+        candidates = precandidates[precandidates['z']==precandidates['z'].max()]
+
+        for c in candidates.itertuples(index=False):
+            v1 = np.array([ x_bloque - x_cone, y_bloque - y_cone])
+            v2 = np.array([ c.x - x_cone, c.y - y_cone ])
+
+            # Si el candidato no está orientado en la misma dirección que el bloque del piso, se omite
+            if v1@v2 < 0: 
+                continue
+            else:
+                v = np.array([ c.x - x_bloque, c.y - y_bloque, c.z - z_bloque ])
+                angle = np.arcsin( (c.z-z_bloque)/np.linalg.norm(v) )
+                # Nos quedamos con el ángulo más grande de todos
+                if max_angle < angle:
+                    max_angle = angle
+                break
+
+    return max_angle
+
+
+
+
+
+
+
 
