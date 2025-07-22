@@ -227,8 +227,7 @@ def Best_Cone_by_Profit_diff_evol(mina, mina_rellena, max_global_angle=45, min_a
 ###############################################################
 
 def Rampa(cono, params_rampa, z_min=None, n_por_vuelta=300, max_vueltas=3, 
-          shift=0, BlockWidthX=10, BlockWidthY=10, z_top=None, return_final_theta_z=False,
-          polar_mode=False
+          shift=0, BlockWidthX=10, BlockWidthY=10, z_top=None, return_final_theta_z=False
           ):
     """
     Genera la trayectoria tridimensional (rampa helicoidal) dentro de un cono truncado.
@@ -283,10 +282,6 @@ def Rampa(cono, params_rampa, z_min=None, n_por_vuelta=300, max_vueltas=3,
 
     if z_min is not None:
         if z_min > z_c:
-            if polar_mode:
-                if return_final_theta_z:
-                    return [], [], theta_0, z_c
-                return [], []
             if return_final_theta_z:
                 return [], [], [], theta_0, z_c
             return [], [], []
@@ -489,10 +484,12 @@ def Rampa_Carril(cono, params_rampa, shift, min_area=None, alturas=None, n_por_v
         a_ell = a*(1 - z_c/h + z_f/h)
         b_ell = b*(1 - z_c/h + z_f/h)
 
-        m = ((a_ell-b_ell)**2)/((a_ell+b_ell)**2)
-        perimeter = np.pi*(a_ell+b_ell)*(1 + 3*m/(10 + np.sqrt(4-3*m)))
-        arco_seccion_loc = (len_seccion/perimeter)*2*np.pi
-        arcsecc = np.min((arco_seccion, arco_seccion_loc))
+        arcsecc = arco_seccion
+        if len_seccion is not None:
+            m = ((a_ell-b_ell)**2)/((a_ell+b_ell)**2)
+            perimeter = np.pi*(a_ell+b_ell)*(1 + 3*m/(10 + np.sqrt(4-3*m)))
+            arco_seccion_loc = (len_seccion/perimeter)*2*np.pi
+            arcsecc = np.min((arco_seccion, arco_seccion_loc))
 
         if min_area is not None:
             z_min = None
@@ -502,8 +499,8 @@ def Rampa_Carril(cono, params_rampa, shift, min_area=None, alturas=None, n_por_v
             z_min = None
 
         if i==0:
-            x_rampa, y_rampa, z_rampa, theta_f, z_f = Rampa(cono, params_rampa, z_min, n_trozo, arcsecc/(2*np.pi), True, sh, BlockWidthX, BlockWidthY, z_top=None)
-            
+            x_rampa, y_rampa, z_rampa, theta_f, z_f = Rampa(cono, params_rampa, z_min, n_por_vuelta=n_trozo, max_vueltas=arcsecc/(2*np.pi), shift=sh, BlockWidthX=BlockWidthX, BlockWidthY=BlockWidthY, z_top=None, return_final_theta_z=True)
+
             X_curve += x_rampa; Y_curve += y_rampa; Z_curve += z_rampa
             rampas.append([x_rampa, y_rampa, z_rampa, sh])
             previous_shift = sh
@@ -517,7 +514,7 @@ def Rampa_Carril(cono, params_rampa, shift, min_area=None, alturas=None, n_por_v
             else:
                 s = sh
 
-            x_rampa, y_rampa, z_rampa, theta_f, z_f = Rampa(cono, (theta_f, descenso, orientacion), z_min, n_trozo, arcsecc/(2*np.pi), True, s, BlockWidthX, BlockWidthY, z_top=z_f)
+            x_rampa, y_rampa, z_rampa, theta_f, z_f = Rampa(cono, (theta_f, descenso, orientacion), z_min, n_por_vuelta=n_trozo, max_vueltas=arcsecc/(2*np.pi), shift=s, BlockWidthX=BlockWidthX, BlockWidthY=BlockWidthY, z_top=z_f, return_final_theta_z=True)
             
             X_curve += x_rampa; Y_curve += y_rampa; Z_curve += z_rampa
             rampas.append([x_rampa, y_rampa, z_rampa, s])
@@ -589,9 +586,12 @@ def precedences_supp(
         x_all, y_all, z_all, ids, tipomineral,
         x_r, y_r, z_r,
         inv_bw_x, inv_bw_y, inv_bh_z,
-        tan_angle_up, tan_angle_down, h_up, h_down):
+        tan_angle_up, tan_angle_down, h_up, h_down, shift_mode):
 
-    z_r_shifted = z_r + (1.0)/(2*inv_bh_z)
+    if shift_mode:
+        z_r_shifted = z_r + (1.0)/(2*inv_bh_z)
+    else:
+        z_r_shifted = z_r + 0.0
 
     n_blocks = x_all.size
     is_prec = np.zeros(n_blocks, dtype=np.bool_)
@@ -612,6 +612,7 @@ def precedences_supp(
 
         is_prec |= arriba & (dist <= z_rel)
         is_supp |= abajo & (dist <= z_rel_down)
+
     return ids[is_prec], ids[is_supp]
 
 
@@ -764,10 +765,40 @@ def total_additional_blocks_numba(mina_rellena, rampa, params=dict()):
         np.array(rampa[1]).astype(np.float32),
         np.array(rampa[2]).astype(np.float32),
         inv_bw_x, inv_bw_y, inv_bh_z,
-        tan_ang_up, tan_ang_down, h_up, h_down
+        tan_ang_up, tan_ang_down, h_up, h_down, shift_mode=True
     )
 
     return prec_ids, supp_ids
+
+
+def boundary_precedences(mina_rellena, boundary, angulo_apertura, BlockWidthX, BlockWidthY, BlockHeightZ):
+    boundary_mine = mina_rellena[mina_rellena['id'].isin(boundary)]
+
+    x_all = mina_rellena['x'].values.astype(np.float32)
+    y_all = mina_rellena['y'].values.astype(np.float32)
+    z_all = mina_rellena['z'].values.astype(np.float32)
+    ids_all = mina_rellena['id'].values.astype(np.int32)
+
+    x_b = boundary_mine['x'].values.astype(np.float32)
+    y_b = boundary_mine['y'].values.astype(np.float32)
+    z_b = boundary_mine['z'].values.astype(np.float32)
+
+    tm_all = mina_rellena['tipomineral'].values.astype(np.int8)
+
+    tan_ang_up = np.tan(np.radians(angulo_apertura))
+
+    inv_bw_x = 1.0/BlockWidthX
+    inv_bw_y = 1.0/BlockWidthY
+    inv_bh_z = 1.0/BlockHeightZ
+
+
+    prec, supp = precedences_supp(x_all, y_all, z_all, ids_all, tm_all,
+                     x_b, y_b, z_b,
+                     inv_bw_x, inv_bw_y, inv_bh_z,
+                     tan_ang_up, 0, 0, 0, shift_mode=False)
+    
+    return prec
+
 
 
 def is_valid_shift(s):
@@ -2452,11 +2483,15 @@ def boundary(mina, BlockWidthX=10, BlockWidthY=10, BlockHeightZ=16, mode=True):
     return boundary
 
 
-def global_angle(mina, cono, BlockWidthX=10, BlockWidthY=10, BlockHeightZ=16):
+def global_angle(mina, cono, BlockWidthX=10, BlockWidthY=10, BlockHeightZ=16, z_tolerance=5, debug=False):
     mina = mina.copy()
     mina['x'] = mina['x']/BlockWidthX
     mina['y'] = mina['y']/BlockWidthY
     mina['z'] = mina['z']/BlockHeightZ
+
+    final_candidate_id = []
+
+    alturas = mina['z'].unique()[::-1]
 
     a, b, h, alpha_cone, x_cone, y_cone, z_c = cono
 
@@ -2474,6 +2509,9 @@ def global_angle(mina, cono, BlockWidthX=10, BlockWidthY=10, BlockHeightZ=16):
 
     max_angle = 0
 
+    dist_to_center = np.sqrt( (mina['x'] - x_cone)**2 + (mina['y'] - y_cone)**2 )
+
+    mina['dist_to_center'] = dist_to_center
 
     for id_bloque in boundary_last_fb:
         bloque = mina[mina['id']==id_bloque]
@@ -2489,9 +2527,12 @@ def global_angle(mina, cono, BlockWidthX=10, BlockWidthY=10, BlockHeightZ=16):
 
         dist_to_plane = np.abs(A*mina['x'] + B*mina['y'] + D)/np.sqrt(mina['x']**2 + mina['y']**2)
 
+
         # De los bloques más cercanos al plano, nos quedamos con aquellos de mayor altura
         precandidates = mina[dist_to_plane <= 1]
-        candidates = precandidates[precandidates['z']==precandidates['z'].max()]
+        candidates = precandidates[precandidates['z']>=alturas[z_tolerance-1]]
+
+        candidates = candidates.sort_values(by=['dist_to_center'], ascending=False)
 
         for c in candidates.itertuples(index=False):
             v1 = np.array([ x_bloque - x_cone, y_bloque - y_cone])
@@ -2501,15 +2542,66 @@ def global_angle(mina, cono, BlockWidthX=10, BlockWidthY=10, BlockHeightZ=16):
             if v1@v2 < 0: 
                 continue
             else:
+                final_candidate_id.append(c.id)
                 v = np.array([ c.x - x_bloque, c.y - y_bloque, c.z - z_bloque ])
                 angle = np.arcsin( (c.z-z_bloque)/np.linalg.norm(v) )
+
+                if debug:
+                    print(np.rad2deg(angle))
+
                 # Nos quedamos con el ángulo más grande de todos
                 if max_angle < angle:
                     max_angle = angle
                 break
 
+    if debug:
+        return max_angle, final_candidate_id
     return max_angle
 
+
+def pit_con_rampa(mina, mina_rellena, cono, rampa,
+                   BlockWidthX, BlockWidthY, BlockHeightZ,
+                   ancho_rampa, angulo_apertura_up, angulo_apertura_down):
+
+    x_rampa, y_rampa, z_rampa = rampa
+    mina_x = mina_rellena['x'].to_numpy()
+    mina_y = mina_rellena['y'].to_numpy()
+    mina_z = mina_rellena['z'].to_numpy()
+    mina_id = mina_rellena['id'].to_numpy()
+    a, b, h, alpha, x_c, y_c, z_c = cono
+
+    pared_ext, pared_int = pared_rampa_numba(
+        x_rampa, y_rampa, z_rampa,
+        mina_x, mina_y, mina_z, mina_id,
+        x_c, y_c, z_c, a, b, h,
+        ancho_rampa
+    )
+    pared_ext = set(pared_ext)
+    pared_int = set(pared_int)
+
+    prec, supp = total_additional_blocks_numba(mina_rellena, rampa, params={
+        'BlockWidthX': BlockWidthX,
+        'BlockWidthY': BlockWidthY,
+        'BlockHeightZ': BlockHeightZ,
+        'angulo_apertura_up': angulo_apertura_up,
+        'angulo_apertura_down': angulo_apertura_down,
+        'ancho_rampa': ancho_rampa
+    })
+
+    prec = set(prec) | pared_int
+    supp = (set(supp) - prec) | pared_ext
+    
+
+    total_ids = (set(mina['id'].values) | prec) - supp
+    pre_mina_con_rampa = mina_rellena[mina_rellena['id'].isin(total_ids)]
+
+    bound = boundary(pre_mina_con_rampa, BlockWidthX, BlockWidthY, BlockHeightZ)
+    prec_boundary = boundary_precedences(mina_rellena, bound, angulo_apertura_up, BlockWidthX, BlockWidthY, BlockHeightZ)
+    prec_boundary = set(prec_boundary)
+    total_ids = total_ids | prec_boundary
+    mina_con_rampa = mina_rellena[mina_rellena['id'].isin(total_ids)]
+
+    return mina_con_rampa
 
 
 
