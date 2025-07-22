@@ -586,7 +586,7 @@ def precedences_supp(
         x_all, y_all, z_all, ids, tipomineral,
         x_r, y_r, z_r,
         inv_bw_x, inv_bw_y, inv_bh_z,
-        tan_angle_up, tan_angle_down, h_up, h_down, shift_mode):
+        tan_angle_up, tan_angle_down, h_up, h_down, shift_mode, config):
 
     if shift_mode:
         z_r_shifted = z_r + (1.0)/(2*inv_bh_z)
@@ -602,7 +602,11 @@ def precedences_supp(
     for j in range(x_r.size):
         dx = np.abs(x_all - x_r[j]) * inv_bw_x
         dy = np.abs(y_all - y_r[j]) * inv_bw_y
-        dist = np.maximum(dx, dy)
+
+        if config:
+            dist = np.maximum(dx, dy)
+        else:
+            dist = dx + dy
 
         arriba = (z_all >= z_r_shifted[j]) & not_aire
         z_rel  = ((z_all - (z_r_shifted[j] - h_up)) * inv_bh_z) * tan_angle_up
@@ -643,7 +647,7 @@ def pared_rampa_numba(
     x_rampa, y_rampa, z_rampa,
     mina_x, mina_y, mina_z, mina_id,
     x_c, y_c, z_c, a, b, h,
-    ancho_rampa
+    ancho_rampa, tolerance
 ):
     pared_ext = []
     pared_int = []
@@ -713,7 +717,7 @@ def pared_rampa_numba(
             else:
                 dist = np.sqrt( (mina_x[j] - new_point_x_ext)**2 + (mina_y[j] - new_point_y_ext)**2 )
 
-                if dist > 2*ancho_rampa:
+                if dist > tolerance*ancho_rampa:
                     continue
 
                 dx_m = mina_x[j] - new_point_x_ext
@@ -731,7 +735,7 @@ def total_additional_blocks_numba(mina_rellena, rampa, params=dict()):
     params.setdefault('BlockWidthX', 10)
     params.setdefault('BlockWidthY', 10)
     params.setdefault('BlockHeightZ', 16)
-    params.setdefault('config', '9-points')
+    params.setdefault('config', '5-points')
     params.setdefault('angulo_apertura_up', 20)
     params.setdefault('angulo_apertura_down', 20)
     params.setdefault('ancho_rampa', 30)
@@ -759,19 +763,26 @@ def total_additional_blocks_numba(mina_rellena, rampa, params=dict()):
     h_up = ancho_rampa/(2.0*tan_ang_up)
     h_down = ancho_rampa/(2.0*tan_ang_down)
 
+    if config == '9-points':
+        conf = True
+    elif config == '5-points':
+        conf = False
+    else:
+        raise ValueError('Use config 9-points o 5-points.')
+
     prec_ids, supp_ids = precedences_supp(
         x_all, y_all, z_all, ids_all, tm_all,
         np.array(rampa[0]).astype(np.float32),
         np.array(rampa[1]).astype(np.float32),
         np.array(rampa[2]).astype(np.float32),
         inv_bw_x, inv_bw_y, inv_bh_z,
-        tan_ang_up, tan_ang_down, h_up, h_down, shift_mode=True
+        tan_ang_up, tan_ang_down, h_up, h_down, shift_mode=True, config=conf
     )
 
     return prec_ids, supp_ids
 
 
-def boundary_precedences(mina_rellena, boundary, angulo_apertura, BlockWidthX, BlockWidthY, BlockHeightZ):
+def boundary_precedences(mina_rellena, boundary, angulo_apertura, BlockWidthX, BlockWidthY, BlockHeightZ, config='5-points'):
     boundary_mine = mina_rellena[mina_rellena['id'].isin(boundary)]
 
     x_all = mina_rellena['x'].values.astype(np.float32)
@@ -791,11 +802,18 @@ def boundary_precedences(mina_rellena, boundary, angulo_apertura, BlockWidthX, B
     inv_bw_y = 1.0/BlockWidthY
     inv_bh_z = 1.0/BlockHeightZ
 
+    if config == '9-points':
+        conf = True
+    elif config == '5-points':
+        conf = False
+    else:
+        raise ValueError('Use config 9-points o 5-points.')
+
 
     prec, supp = precedences_supp(x_all, y_all, z_all, ids_all, tm_all,
                      x_b, y_b, z_b,
                      inv_bw_x, inv_bw_y, inv_bh_z,
-                     tan_ang_up, 0, 0, 0, shift_mode=False)
+                     tan_ang_up, 0, 0, 0, shift_mode=False, config=conf)
     
     return prec
 
@@ -1912,89 +1930,166 @@ def plot_perfil_superior(mina, mina_rellena, rampa,
     fig.show()
 
 
-def plot_perfil_superior_pyvista(mina, mina_rellena, rampa,
-                                 BlockWidthX=10, BlockWidthY=10, BlockHeightZ=16, ancho_rampa=30, block_size=5, filtrar_aire=True,
-                                 all_precedences=set(), width=900, height=800):
-    """
-    Crea una vista 3D de una mina y una rampa utilizando PyVista.
+# def plot_perfil_superior_pyvista(mina, mina_rellena, rampa,
+#                                  BlockWidthX=10, BlockWidthY=10, BlockHeightZ=16, ancho_rampa=30, block_size=5, filtrar_aire=True,
+#                                  all_precedences=set(), width=900, height=800):
+#     """
+#     Crea una vista 3D de una mina y una rampa utilizando PyVista.
 
-    Args:
-        mina (pd.DataFrame): DataFrame con los datos de los bloques de la mina (debe contener 'x', 'y', 'z', 'id').
-        mina_rellena (pd.DataFrame): DataFrame con todos los bloques del área de interés, incluyendo la mina y el espacio vacío.
-        rampa (pd.DataFrame): DataFrame con los datos que definen la rampa (debe contener 'x', 'y', 'z').
-        BlockWidthX (int): Ancho de los bloques en la dirección X.
-        BlockWidthY (int): Ancho de los bloques en la dirección Y.
-        BlockHeightZ (int): Altura de los bloques en la dirección Z.
-        ancho_rampa (int): Ancho de la rampa para la determinación de los bloques.
-        block_size (int): Tamaño visual de los marcadores (puntos) en la gráfica.
-        filtrar_aire (bool): Booleano para filtrar el aire.
-        all_precedences (set): Conjunto de IDs de bloques a excluir.
-        width (int): Ancho de la ventana de visualización.
-        height (int): Alto de la ventana de visualización.
-    """
+#     Args:
+#         mina (pd.DataFrame): DataFrame con los datos de los bloques de la mina (debe contener 'x', 'y', 'z', 'id').
+#         mina_rellena (pd.DataFrame): DataFrame con todos los bloques del área de interés, incluyendo la mina y el espacio vacío.
+#         rampa (pd.DataFrame): DataFrame con los datos que definen la rampa (debe contener 'x', 'y', 'z').
+#         BlockWidthX (int): Ancho de los bloques en la dirección X.
+#         BlockWidthY (int): Ancho de los bloques en la dirección Y.
+#         BlockHeightZ (int): Altura de los bloques en la dirección Z.
+#         ancho_rampa (int): Ancho de la rampa para la determinación de los bloques.
+#         block_size (int): Tamaño visual de los marcadores (puntos) en la gráfica.
+#         filtrar_aire (bool): Booleano para filtrar el aire.
+#         all_precedences (set): Conjunto de IDs de bloques a excluir.
+#         width (int): Ancho de la ventana de visualización.
+#         height (int): Alto de la ventana de visualización.
+#     """
 
+#     id_in_rampa = isin_rampa(mina_rellena, rampa, BlockHeightZ, ancho_rampa, filtrar_aire=filtrar_aire)
+
+#     x_min = mina['x'].min() - BlockWidthX
+#     x_max = mina['x'].max() + BlockWidthX
+#     y_min = mina['y'].min() - BlockWidthY
+#     y_max = mina['y'].max() + BlockWidthY
+
+#     ids_mina = set(mina['id'])
+
+#     mask = (~mina_rellena['id'].isin(ids_mina)) & \
+#            (mina_rellena['x'] <= x_max) & (mina_rellena['x'] >= x_min) & \
+#            (mina_rellena['y'] >= y_min) & (mina_rellena['y'] <= y_max) & \
+#            (~mina_rellena['id'].isin(id_in_rampa)) & \
+#            (~mina_rellena['id'].isin(all_precedences)) & \
+#            (mina_rellena['tipomineral'] != -1) # Excluye bloques de "aire" si tipomineral -1
+
+#     notmina = mina_rellena[mask]
+#     blocks_rampa = mina_rellena[mina_rellena['id'].isin(id_in_rampa)]
+
+#     # Inicializa el plotter de PyVista
+#     plotter = pv.Plotter(window_size=[width, height], off_screen=False)
+    
+#     # Crear puntos para notmina
+#     points_notmina = notmina[['x', 'y', 'z']].astype(float).values
+#     # Los escalares para el color basado en Z
+#     scalars_notmina = notmina['z'].values
+    
+#     if points_notmina.size > 0:
+#         # Usar pv.PolyData para crear un conjunto de puntos
+#         cloud_notmina = pv.PolyData(points_notmina)
+#         # Asignar los escalares para el mapeo de color
+#         cloud_notmina['z_values'] = scalars_notmina
+#         plotter.add_mesh(cloud_notmina, 
+#                          render_points_as_spheres=True, # Hace que los puntos se vean como esferas
+#                          point_size=block_size, 
+#                          scalars='z_values', 
+#                          cmap='jet', 
+#                          show_scalar_bar=True, 
+#                          scalar_bar_args={'title': 'Bloques NotMina Z'},
+#                          label='Bloques NotMina')
+
+#     # Crear puntos para la rampa
+#     points_rampa = blocks_rampa[['x', 'y', 'z']].astype(float).values
+#     if points_rampa.size > 0:
+#         cloud_rampa = pv.PolyData(points_rampa)
+#         plotter.add_mesh(cloud_rampa, 
+#                          render_points_as_spheres=True, 
+#                          point_size=block_size, 
+#                          color='black', 
+#                          label='Rampa') # Etiqueta para la leyenda
+
+#     # Configuración del título y leyenda
+#     plotter.add_title(f'Rampa a soporte de bloques', font_size=20)
+#     plotter.add_legend(face='circle', loc='upper right', bcolor=[0.9, 0.9, 0.9]) # Añade una leyenda
+
+#     # Mostrar la malla de referencia (grid) y los ejes
+#     plotter.show_grid()
+#     plotter.add_axes()
+    
+#     # Mostrar la ventana de PyVista
+#     plotter.show()
+
+def plot_perfil_superior_pyvista_fast(
+    mina, mina_rellena, rampa,
+    BlockWidthX=10, BlockWidthY=10, BlockHeightZ=16, ancho_rampa=30,
+    filtrar_aire=True, all_precedences=set()
+):
     id_in_rampa = isin_rampa(mina_rellena, rampa, BlockHeightZ, ancho_rampa, filtrar_aire=filtrar_aire)
+    x_r, y_r, z_r = map(np.array, rampa)
 
-    x_min = mina['x'].min() - BlockWidthX
-    x_max = mina['x'].max() + BlockWidthX
-    y_min = mina['y'].min() - BlockWidthY
-    y_max = mina['y'].max() + BlockWidthY
+    x_min = min(mina['x'].min(), x_r.min()) - BlockWidthX
+    x_max = max(mina['x'].max(), x_r.max()) + BlockWidthX
+    y_min = min(mina['y'].min(), y_r.min()) - BlockWidthY
+    y_max = max(mina['y'].max(), y_r.max()) + BlockWidthY
 
     ids_mina = set(mina['id'])
 
-    mask = (~mina_rellena['id'].isin(ids_mina)) & \
-           (mina_rellena['x'] <= x_max) & (mina_rellena['x'] >= x_min) & \
-           (mina_rellena['y'] >= y_min) & (mina_rellena['y'] <= y_max) & \
-           (~mina_rellena['id'].isin(id_in_rampa)) & \
-           (~mina_rellena['id'].isin(all_precedences)) & \
-           (mina_rellena['tipomineral'] != -1) # Excluye bloques de "aire" si tipomineral -1
+    mask = (
+        (~mina_rellena['id'].isin(ids_mina)) &
+        (~mina_rellena['id'].isin(id_in_rampa)) &
+        (~mina_rellena['id'].isin(all_precedences)) &
+        (mina_rellena['x'] >= x_min) & (mina_rellena['x'] <= x_max) &
+        (mina_rellena['y'] >= y_min) & (mina_rellena['y'] <= y_max) &
+        (mina_rellena['tipomineral'] != -1)
+    )
 
     notmina = mina_rellena[mask]
     blocks_rampa = mina_rellena[mina_rellena['id'].isin(id_in_rampa)]
 
-    # Inicializa el plotter de PyVista
-    plotter = pv.Plotter(window_size=[width, height], off_screen=False)
-    
-    # Crear puntos para notmina
-    points_notmina = notmina[['x', 'y', 'z']].values
-    # Los escalares para el color basado en Z
-    scalars_notmina = notmina['z'].values
-    
-    if points_notmina.size > 0:
-        # Usar pv.PolyData para crear un conjunto de puntos
-        cloud_notmina = pv.PolyData(points_notmina)
-        # Asignar los escalares para el mapeo de color
-        cloud_notmina['z_values'] = scalars_notmina
-        plotter.add_mesh(cloud_notmina, 
-                         render_points_as_spheres=True, # Hace que los puntos se vean como esferas
-                         point_size=block_size, 
-                         scalars='z_values', 
-                         cmap='jet', 
-                         show_scalar_bar=True, 
-                         scalar_bar_args={'title': 'Bloques NotMina Z'},
-                         label='Bloques NotMina')
+    # Coordenadas de cubos
+    def grid_from_df(df, color='z'):
+        n = len(df)
+        if n == 0:
+            return None
 
-    # Crear puntos para la rampa
-    points_rampa = blocks_rampa[['x', 'y', 'z']].values
-    if points_rampa.size > 0:
-        cloud_rampa = pv.PolyData(points_rampa)
-        plotter.add_mesh(cloud_rampa, 
-                         render_points_as_spheres=True, 
-                         point_size=block_size, 
-                         color='black', 
-                         label='Rampa') # Etiqueta para la leyenda
+        dx, dy, dz = BlockWidthX / 2, BlockWidthY / 2, BlockHeightZ / 2
 
-    # Configuración del título y leyenda
-    plotter.add_title(f'Rampa a soporte de bloques', font_size=20)
-    plotter.add_legend(face='circle', loc='upper right', bcolor=[0.9, 0.9, 0.9]) # Añade una leyenda
+        # 8 vértices por bloque
+        offsets = np.array([
+            [-dx, -dy, -dz], [+dx, -dy, -dz], [+dx, +dy, -dz], [-dx, +dy, -dz],
+            [-dx, -dy, +dz], [+dx, -dy, +dz], [+dx, +dy, +dz], [-dx, +dy, +dz]
+        ])
 
-    # Mostrar la malla de referencia (grid) y los ejes
-    plotter.show_grid()
-    plotter.add_axes()
-    
-    # Mostrar la ventana de PyVista
-    plotter.show()
+        points = np.empty((n * 8, 3))
+        for i, (_, row) in enumerate(df.iterrows()):
+            base = i * 8
+            center = np.array([row['x'], row['y'], row['z']])
+            points[base:base+8] = center + offsets
 
+        # Celdas tipo hexaedro (VTK_HEXAHEDRON = 12)
+        cells = np.empty((n, 9), dtype=np.int64)
+        for i in range(n):
+            base = i * 8
+            cells[i] = [8, base+0, base+1, base+2, base+3, base+4, base+5, base+6, base+7]
+
+        cells = cells.ravel()
+        celltypes = np.full(n, 12, dtype=np.uint8)
+
+        grid = pv.UnstructuredGrid(cells, celltypes, points)
+
+        if color in df.columns:
+            grid[color] = df[color].to_numpy()
+        return grid
+
+    # Crear mallas
+    grid_notmina = grid_from_df(notmina, color='z')
+    grid_rampa = grid_from_df(blocks_rampa)
+
+    # Mostrar escena
+    p = pv.Plotter()
+    if grid_notmina is not None:
+        p.add_mesh(grid_notmina, scalars='z', cmap='jet', show_scalar_bar=True, name='notmina')
+    if grid_rampa is not None:
+        p.add_mesh(grid_rampa, color='black', name='rampa')
+
+    p.view_xy()
+    p.show_bounds(grid='front', location='outer', all_edges=True)
+    p.add_title('Vista superior optimizada (UnstructuredGrid)', font_size=14)
+    p.show()
 
 ######################################################
 ################# Metrics Functions ##################
@@ -2559,9 +2654,10 @@ def global_angle(mina, cono, BlockWidthX=10, BlockWidthY=10, BlockHeightZ=16, z_
     return max_angle
 
 
-def pit_con_rampa(mina, mina_rellena, cono, rampa,
+def pit_con_rampa(mina_rellena, cono, rampa,
                    BlockWidthX, BlockWidthY, BlockHeightZ,
-                   ancho_rampa, angulo_apertura_up, angulo_apertura_down):
+                   ancho_rampa, angulo_apertura_up, angulo_apertura_down,
+                   tolerance_pared):
 
     x_rampa, y_rampa, z_rampa = rampa
     mina_x = mina_rellena['x'].to_numpy()
@@ -2574,7 +2670,7 @@ def pit_con_rampa(mina, mina_rellena, cono, rampa,
         x_rampa, y_rampa, z_rampa,
         mina_x, mina_y, mina_z, mina_id,
         x_c, y_c, z_c, a, b, h,
-        ancho_rampa
+        ancho_rampa, tolerance_pared
     )
     pared_ext = set(pared_ext)
     pared_int = set(pared_int)
@@ -2591,8 +2687,9 @@ def pit_con_rampa(mina, mina_rellena, cono, rampa,
     prec = set(prec) | pared_int
     supp = (set(supp) - prec) | pared_ext
     
+    upit = mina_rellena[isin_cone(mina_rellena, cono)]
 
-    total_ids = (set(mina['id'].values) | prec) - supp
+    total_ids = (set(upit['id'].values) | prec) - supp
     pre_mina_con_rampa = mina_rellena[mina_rellena['id'].isin(total_ids)]
 
     bound = boundary(pre_mina_con_rampa, BlockWidthX, BlockWidthY, BlockHeightZ)
