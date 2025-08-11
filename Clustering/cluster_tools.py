@@ -2526,7 +2526,7 @@ def Centros_Clusters(FaseBanco):
     for cluster_id in sorted(ID_Clusters):
         Cluster = FaseBanco.loc[FaseBanco['cluster']==cluster_id]
         P_center = (Cluster['x'].mean(), Cluster['y'].mean())
-        Centers[id] = P_center
+        Centers[cluster_id] = P_center
     return Centers
 
 
