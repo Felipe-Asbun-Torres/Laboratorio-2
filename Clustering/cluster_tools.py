@@ -24,7 +24,7 @@ from collections import defaultdict
 #################### Clustering Functions #####################
 ###############################################################
 
-def Calculate_Adjency_Matrix(FaseBanco, BlockWidthX=10, BlockWidthY=10, Sectores=[]):
+def Calculate_Adjency_Matrix(FaseBanco, BlockWidthX, BlockWidthY, Sectores=[]):
     """
     Construye la matriz de adyacencia entre bloques de una fase-banco en 2D, considerando sus posiciones (x, y)
     y el tamaño físico de cada bloque. Opcionalmente permite restringir la conectividad dentro de sectores definidos.
@@ -33,9 +33,9 @@ def Calculate_Adjency_Matrix(FaseBanco, BlockWidthX=10, BlockWidthY=10, Sectores
     ----------
     FaseBanco : pandas.DataFrame
         DataFrame que contiene los bloques de una fase en un banco. Debe incluir al menos las columnas 'x' y 'y'.
-    BlockWidthX : float, opcional
+    BlockWidthX : float
         Ancho del bloque en la dirección X. Por defecto es 10.
-    BlockWidthY : float, opcional
+    BlockWidthY : float
         Ancho del bloque en la dirección Y. Por defecto es 10.
     Sectores : list de listas, opcional
         Lista de sectores, donde cada sector se define como una lista de 4 tuplas (P1, P2, P3, P4) que representan
@@ -109,7 +109,7 @@ def Calculate_Adjency_Matrix(FaseBanco, BlockWidthX=10, BlockWidthY=10, Sectores
         return adjency_matrix
 
 
-def Calculate_Vertical_Adyacency_Matrix(df_sup, df_inf, BlockWidth=10, BlockHeight=10, arcs=defaultdict(list), cluster_col='cluster'):
+def Calculate_Vertical_Adjency_Matrix(df_sup, df_inf, BlockWidthX, BlockWidthY, cluster_col='cluster'):
     """
     Calcula la matriz de adyacencia vertical entre clusters de dos fases consecutivas de la mina.
 
@@ -123,13 +123,10 @@ def Calculate_Vertical_Adyacency_Matrix(df_sup, df_inf, BlockWidth=10, BlockHeig
         DataFrame que representa la fase superior. Debe contener las columnas 'x', 'y' y `cluster_col`.
     df_inf : pandas.DataFrame
         DataFrame que representa la fase inferior. Debe contener las columnas 'x', 'y' y `cluster_col`.
-    BlockWidth : float, opcional
-        Ancho de los bloques en la dirección X. Usado para normalizar distancias. Por defecto es 10.
-    BlockHeight : float, opcional
-        Altura (profundidad) de los bloques en la dirección Y. Usado para normalizar distancias. Por defecto es 10.
-    arcs : collections.defaultdict(list), opcional
-        Parámetro no utilizado directamente en esta función, pero se puede usar como acumulador externo de arcos.
-        Por defecto es un defaultdict vacío.
+    BlockWidthX : float
+        Ancho de los bloques en la dirección X.
+    BlockWidthY : float
+        Profundidad de los bloques en la dirección Y.
     cluster_col : str, opcional
         Nombre de la columna que identifica el cluster al que pertenece cada bloque. Por defecto es 'cluster'.
 
@@ -165,8 +162,8 @@ def Calculate_Vertical_Adyacency_Matrix(df_sup, df_inf, BlockWidth=10, BlockHeig
     Y2 = matlib.repmat(y2.reshape(1, len(y2)), len(y1), 1)  # (n_sup, n_inf)
 
 
-    Dx = np.abs((1/BlockWidth)*(X1 - X2))
-    Dy = np.abs((1/BlockHeight)*(Y1 - Y2))
+    Dx = np.abs((1/BlockWidthX)*(X1 - X2))
+    Dy = np.abs((1/BlockWidthY)*(Y1 - Y2))
     adjency_matrix = (np.sqrt(Dx**2 + Dy**2)<=1) # Distancia euclidiana normalizada
     # adjency_matrix = (Dx <= 1) & (Dy <= 1) # Mide la adyacencia por direcciones X e Y, usando 1, dos bloques son adyacentes si están a una distancia de 1 bloque o menos
 
@@ -668,7 +665,7 @@ def Clustering_mina(mina, cm=2, cr=0.25, cp=10, P=4, R=0.85, alpha_ley_corte=0,
 
     options.setdefault('BlockWidthX', 10)
     options.setdefault('BlockWidthY', 10)
-    options.setdefault('BlockHeightZ', 16)
+    # options.setdefault('BlockHeightZ', 16)
     options.setdefault('area_minima_operativa', np.pi*80*80)
 
 
@@ -681,26 +678,26 @@ def Clustering_mina(mina, cm=2, cr=0.25, cp=10, P=4, R=0.85, alpha_ley_corte=0,
     options.setdefault('penalizacion_roca', 0.9)
     options.setdefault('penalizacion_c', 0.5)
 
-    options.setdefault('tamaño_maximo_cluster', 0.1)
-    options.setdefault('tamaño_promedio_cluster', 0.075)
-    options.setdefault('tamaño_minimo_cluster', 0.01)
+    options.setdefault('tamaño_maximo_cluster', 60)
+    options.setdefault('tamaño_promedio_cluster', 50)
+    options.setdefault('tamaño_minimo_cluster', 10)
     options.setdefault('tolerancia_tamaño_maximo_cluster', 10)
     options.setdefault('tolerancia_tamaño_minimo_cluster', 5)
 
     options.setdefault('Shape_Refinement', 'Tabesh') # None, 'Tabesh' o 'Modificado'
     options.setdefault('Iteraciones_Shape_Refinement', 5)
 
-    options.setdefault('save', True)
+    # options.setdefault('save', True)
+    # options.setdefault('path_save', 'Clusterizacion/Resultados/')
     options.setdefault('save_images', True)
-    options.setdefault('path_save', 'Clusterizacion/Resultados/')
     options.setdefault('path_save_images', 'Clusterizacion/Imagenes/')
     options.setdefault('path_params', 'Clusterizacion/Params/')
     options.setdefault('show_block_label', True)
-    options.setdefault('cmap', 'plasma')
+    options.setdefault('cmap', 'jet')
 
     BlockWidthX = options['BlockWidthX']
     BlockWidthY = options['BlockWidthY']
-    BlockHeightZ = options['BlockHeightZ']
+    # BlockHeightZ = options['BlockHeightZ']
     area_minima_operativa = options['area_minima_operativa']
 
 
@@ -738,9 +735,9 @@ def Clustering_mina(mina, cm=2, cr=0.25, cp=10, P=4, R=0.85, alpha_ley_corte=0,
 
     Iterations_PostProcessing = options['Iteraciones_Shape_Refinement']
 
-    save = options['save']
+    # save = options['save']
     save_images = options['save_images']
-    path_save = options['path_save']
+    # path_save = options['path_save']
     path_params = options['path_params']
     path_save_images = options['path_save_images']
     show_block_label = options['show_block_label']
@@ -866,11 +863,11 @@ def Clustering_mina(mina, cm=2, cr=0.25, cp=10, P=4, R=0.85, alpha_ley_corte=0,
                     df_sup = fase_banco.copy()
                     df_sup.reset_index(drop=True, inplace=True)
                     df_sup['cluster'] = df_sup['id']
-                    A_vertical = Calculate_Vertical_Adyacency_Matrix(df_sup,df_inf, BlockWidth=BlockWidthX/4, BlockHeight=BlockWidthY/4) # Tiene que ser estricto pues es para calcular C
+                    A_vertical = Calculate_Vertical_Adjency_Matrix(df_sup,df_inf, BlockWidth=BlockWidthX/4, BlockHeight=BlockWidthY/4) # Tiene que ser estricto pues es para calcular C
                     # Ahora calculamos la matriz C
                     C = A_vertical@A_vertical.T
                     C = (1-C)*penalizacion_c+C
-                    #Ahora la similaridad
+                    #A hora la similaridad
                     similarity_matrix = similarity_matrix*C
 
 
@@ -1240,6 +1237,7 @@ def plot_fase_banco(FaseBanco, column_hue='cut', text_hue=None, params=dict(), a
     params.setdefault('arrow_color', 'blueviolet')
     params.setdefault('precedence_cmap', 'binary')
     params.setdefault('precedence_lw', 2.5)
+    params.setdefault('title', None)
     
     BlockWidthX = params['BlockWidthX']
     BlockWidthY = params['BlockWidthY']
@@ -1264,6 +1262,7 @@ def plot_fase_banco(FaseBanco, column_hue='cut', text_hue=None, params=dict(), a
     ylim = params['ylim']
     arrow_lw = params['arrow_lw']
     arrow_color = params['arrow_color']
+    title = params['title']
 
     required_cols = {'x', 'y', 'fase', 'z', 'banco', column_hue}
 
@@ -1362,17 +1361,21 @@ def plot_fase_banco(FaseBanco, column_hue='cut', text_hue=None, params=dict(), a
     else:
         ax.set_ylim(ylim[0], ylim[1])
 
-    if column_hue=='cluster':
-        num_clusters = len(FaseBanco['cluster'].unique())
-        ax.set_title(f'Fase {fase} - Banco (Z={z}) - Hue {column_hue} - N° Clusters {num_clusters}')
+    if title is not None:
+        ax.set_title(title)
     else:
-        ax.set_title(f'Fase {fase} - Banco (Z={z}) - Hue {column_hue}')
+        if column_hue=='cluster':
+            num_clusters = len(FaseBanco['cluster'].unique())
+            ax.set_title(f'Fase {fase} - Banco (Z={z}) - Hue {column_hue} - N° Clusters {num_clusters}')
+        else:
+            ax.set_title(f'Fase {fase} - Banco (Z={z}) - Hue {column_hue}')
+        
         
     ax.set_aspect('equal', adjustable='box')
     ax.set_xlabel('X')
     ax.set_ylabel('Y')
-    
-    ax.grid(show_grid, color='gray', linestyle='--', linewidth=0.5)
+    if show_grid:
+        ax.grid(show_grid, color='gray', linestyle='--', linewidth=0.5)
 
     if len(highlight_blocks)>0:
         blocks = FaseBanco[FaseBanco['id'].isin(highlight_blocks)]
@@ -1453,6 +1456,28 @@ def plot_fase_banco(FaseBanco, column_hue='cut', text_hue=None, params=dict(), a
                     xs, ys = segment(xc,yc)
                     ax.plot(xs, ys, color='black', lw=cluster_lw)
 
+    if column_hue == 'fase':
+        vecinos = {
+            (-BlockWidthX, 0): lambda xc,yc: ([xc-BlockWidthX/2]*2,
+                                            [yc-BlockWidthY/2, yc+BlockWidthY/2]),
+            ( BlockWidthX, 0): lambda xc,yc: ([xc+BlockWidthX/2]*2,
+                                            [yc-BlockWidthY/2, yc+BlockWidthY/2]),
+            (0,-BlockWidthY): lambda xc,yc: ([xc-BlockWidthX/2, xc+BlockWidthX/2],
+                                            [yc-BlockWidthY/2]*2),
+            (0, BlockWidthY): lambda xc,yc: ([xc-BlockWidthX/2, xc+BlockWidthX/2],
+                                            [yc+BlockWidthY/2]*2),
+        }
+
+        lookup = {(r.x, r.y): r for _, r in FaseBanco.iterrows()}
+
+        for (xc,yc), row in lookup.items():
+            clu = row[column_hue]
+            for (dx,dy), segment in vecinos.items():
+                vecino = lookup.get((xc+dx, yc+dy))
+                if vecino is None or vecino[column_hue] != clu:
+                    xs, ys = segment(xc,yc)
+                    ax.plot(xs, ys, color='black', lw=cluster_lw)
+
     if show_legend:
         sm = plt.cm.ScalarMappable(cmap=colormap, norm=norm)
         sm.set_array([])
@@ -1474,7 +1499,9 @@ def plot_fase_banco(FaseBanco, column_hue='cut', text_hue=None, params=dict(), a
     else:
         plt.show()
 
-    return fig
+    if ax is None:
+        plt.close(fig)
+    # return fig
 
 
 def plot_mina_3D(mina, column_hue='tipomineral', params=dict()):
@@ -2471,10 +2498,10 @@ def Clusters_Vecinos(FaseBanco, Cluster, AdjencyMatrix):
 
     clusters_vecinos = []
     for b in Blocks:
-            b_is_row = np.where(rows == b)[0]
-            for j in b_is_row:
-                if fase_banco.iloc[b]['cluster'] != fase_banco.iloc[cols[j]]['cluster']:
-                    clusters_vecinos.append(fase_banco.iloc[cols[j]]['cluster'].astype(int))
+        b_is_row = np.where(rows == b)[0]
+        for j in b_is_row:
+            if fase_banco.iloc[b]['cluster'] != fase_banco.iloc[cols[j]]['cluster']:
+                clusters_vecinos.append(fase_banco.iloc[cols[j]]['cluster'].astype(int))
 
     return clusters_vecinos
 
